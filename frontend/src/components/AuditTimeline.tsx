@@ -1,0 +1,111 @@
+import React from 'react';
+import { AuditLog } from '../types';
+import { History, Shield, User, Bot, Clock, Link, Lock, FileKey } from 'lucide-react';
+
+interface AuditTimelineProps {
+  logs: AuditLog[];
+}
+
+export const AuditTimeline: React.FC<AuditTimelineProps> = ({ logs }) => {
+  if (!logs || logs.length === 0) {
+    return (
+      <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 text-center text-xs text-slate-500 font-mono">
+        No audit log events recorded for this case.
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 backdrop-blur space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center gap-2">
+          <History className="w-4 h-4 text-cyan-400" />
+          <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-200">
+            Chain of Custody & Cryptographic Ledger ({logs.length} Blocks)
+          </h3>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
+            <Lock className="w-3 h-3" />
+            SHA-256 CHAINED
+          </span>
+        </div>
+      </div>
+
+      <div className="relative pl-6 border-l-2 border-slate-800 space-y-4">
+        {logs.map((item, idx) => {
+          const isOfficer = item.actor.includes('OFFICER');
+          const isPurge = item.action.includes('PURGE');
+          const dateFormatted = new Date(item.timestamp).toLocaleTimeString([], {
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit'
+          });
+
+          return (
+            <div key={item.id || idx} className="relative group">
+              {/* Dot indicator */}
+              <div
+                className={`absolute -left-[31px] top-1 h-3.5 w-3.5 rounded-full border-2 border-slate-950 flex items-center justify-center ${
+                  isOfficer ? 'bg-cyan-500' : isPurge ? 'bg-amber-500' : 'bg-blue-600'
+                }`}
+              ></div>
+
+              <div className={`p-3 rounded-lg border text-xs font-mono space-y-1.5 transition-colors ${
+                isPurge
+                  ? 'bg-amber-950/20 border-amber-500/40'
+                  : 'bg-slate-950/70 border-slate-800/80 hover:border-slate-700'
+              }`}>
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className={`font-bold text-xs tracking-wide ${isPurge ? 'text-amber-300' : 'text-slate-200'}`}>
+                      {item.action.replace(/_/g, ' ')}
+                    </span>
+                    <span className={`px-1.5 py-0.2 rounded text-[10px] font-medium ${
+                      isOfficer
+                        ? 'bg-cyan-950 text-cyan-300 border border-cyan-500/30'
+                        : isPurge
+                        ? 'bg-amber-950 text-amber-300 border border-amber-500/30'
+                        : 'bg-slate-800 text-slate-300'
+                    }`}>
+                      {item.actor}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    {item.entry_hash && (
+                      <span
+                        className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800 text-cyan-400 flex items-center gap-1"
+                        title={`Block Hash: ${item.entry_hash}\nPrevious: ${item.previous_hash || 'GENESIS'}`}
+                      >
+                        <FileKey className="w-2.5 h-2.5 text-cyan-500" />
+                        #{item.entry_hash.substring(0, 6)}...{item.entry_hash.substring(60)}
+                      </span>
+                    )}
+                    <div className="flex items-center gap-1 text-[10px] text-slate-400">
+                      <Clock className="w-3 h-3" />
+                      <span>{dateFormatted}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {item.metadata_json && Object.keys(item.metadata_json).length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 pt-0.5">
+                    {Object.entries(item.metadata_json).map(([k, v], mIdx) => (
+                      <span
+                        key={mIdx}
+                        className="text-[10px] px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-400"
+                      >
+                        <strong className="text-slate-300">{k}:</strong> {String(v)}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};

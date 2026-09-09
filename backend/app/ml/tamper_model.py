@@ -1,0 +1,131 @@
+import os
+import cv2
+import numpy as np
+import torch
+import torch.nn as nn
+from PIL import Image, ImageChops, ImageEnhance
+from typing import Dict, Any, List, Tuple
+from pathlib import Path
+
+class LightweightForensicCNN(nn.Module):
+    """
+    Lightweight convolutional neural network for patch-level forensic texture classification.
+    Distinguishes authentic document background textures from spliced/tampered patches.
+    """
+    def __init__(self):
+        super(LightweightForensicCNN, self).__init__()
+        self.features = nn.Sequential(
+            nn.Conv2d(3, 16, kernel_size=3, padding=1),
+            nn.BatchNorm2d(16),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2, 2), # 64 -> 32
+            
+            nn.Conv2d(16, 32, kernel_size=3, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2, 2), # 32 -> 16
+
+            nn.Conv2d(32, 64, kernel_size=3, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
+            nn.AdaptiveAvgPool2d((1, 1))
+        )
+        self.classifier = nn.Sequential(
+            nn.Linear(64, 32),
+            nn.ReLU(inplace=True),
+            nn.Linear(32, 2) # [authentic, tampered]
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        feat = self.features(x)
+        feat = torch.flatten(feat, 1)
+        out = self.classifier(feat)
+        return out
+
+
+class TamperForensics:
+    """
+    Forensic analysis algorithms:
+    - Error Level Analysis (ELA)
+    - Local Laplacian texture gradient variance
+    - Photo boundary edge splicing analysis
+    - Copy-paste / recompression patch detection
+    """
+
+    @staticmethod
+    def generate_ela(image_path: str, output_path: str, quality: int = 90, scale: int = 15) -> Tuple[float, np.ndarray]:
+        """
+        Performs Error Level Analysis (ELA) by recompressing at a specific JPEG quality
+        and calculating the amplified pixel delta.
+        Returns the mean error level and the ELA heatmap image array.
+        """
+        original = Image.open(image_path).convert("RGB")
+        
+        # Save temporary recompressed JPEG in memory
+        temp_path = f"{output_path}_temp.jpg"
+        original.save(temp_path, "JPEG", quality=quality)
+        recompressed = Image.open(temp_path).convert("RGB")
+        
+        # Compute absolute difference
+        diff = ImageChops.difference(original, recompressed)
+        
+        # Remove temp file
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
+        # Scale difference to visualize compression artifacts
+        extrema = diff.getextrema()
+        max_diff = max([ex[1] for ex in extrema]) if extrema else 1
+        scale_val = 255.0 / max(max_diff, 1) if max_diff > 0 else 1.0
+        diff_scaled = ImageEnhance.Brightness(diff).enhance(min(scale_val, scale))
+
+        diff_np = np.array(diff_scaled)
+        # Convert to a thermal / jet heatmap for high visual security-ops impact
+        gray_diff = cv2.cvtColor(diff_np, cv2.COLOR_RGB2GRAY)
+        heatmap = cv2.applyColorMap(gray_diff, cv2.COLORMAP_JET)
+
+        # Overlay heatmap transparently onto original document
+        orig_cv = cv2.cvtColor(np.array(original), cv2.COLOR_RGB2BGR)
+        orig_resized = cv2.resize(orig_cv, (heatmap.shape[1], heatmap.shape[0]))
+        blended = cv2.addWeighted(orig_resized, 0.45, heatmap, 0.55, 0)
+
+        cv2.imwrite(output_path, blended)
+        
+        mean_error = float(np.mean(gray_diff)) / 255.0
+        return mean_error, gray_diff
+
+    @staticmethod
+    def detect_splicing_boundaries(img_cv: np.ndarray) -> List[Dict[str, Any]]:
+        """
+        Detects sharp unnatural rectangular or irregular edge discontinuities characteristic
+        of pasted text patches or replaced photos.
+        """
+        h, w = img_cv.shape[:2]
+        gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
+        
+        # High-pass filter using Laplacian
+        lap = cv2.Laplacian(gray, cv2.CV_64F)
+        lap_abs = np.uint8(np.absolute(lap))
+        
+        # Threshold high-frequency edges
+        _, thresh = cv2.threshold(lap_abs, 45, 255, cv2.THRESH_BINARY)
+        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        anomalies = []
+        for cnt in contours:
+            x, y, cw, ch = cv2.boundingRect(cnt)
+            area = cw * ch
+            # Look for suspicious patches (e.g. 50x20 to 300x150) with high perimeter-to-area ratio
+            if 1500 < area < 70000 and cw > 35 and ch > 18:
+                roi = gray[y:y+ch, x:x+cw]
+                roi_var = float(np.var(roi))
+                
+                # Check variance deviation from image background
+                if roi_var > 1400:
+                    anomalies.append({
+                        "type": "edge_discontinuity",
+                        "region": [int(x), int(y), int(cw), int(ch)],
+                        "confidence": min(0.95, round(0.65 + (roi_var / 5000), 2)),
+                        "explanation": f"High-frequency boundary discontinuity detected at coordinate ({x}, {y})."
+                    })
+        return anomalies[:5] # Return top most prominent

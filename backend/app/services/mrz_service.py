@@ -1,0 +1,218 @@
+import re
+from typing import Dict, Any, List, Optional, Tuple
+
+class MRZService:
+    """
+    ICAO 9303 compliant Machine Readable Zone (MRZ) parser and validator.
+    Supports TD3 (2x44 chars, standard passports), TD1 (3x30 chars), and TD2 (2x36 chars).
+    Calculates exact check digits using the 7-3-1 weight system.
+    """
+
+    # ICAO 9303 character values: 0-9 = 0-9, A-Z = 10-35, < = 0
+    CHAR_VALUES: Dict[str, int] = {
+        **{str(i): i for i in range(10)},
+        **{chr(c): c - 55 for c in range(ord('A'), ord('Z') + 1)},
+        '<': 0
+    }
+    WEIGHTS = [7, 3, 1]
+
+    @classmethod
+    def compute_check_digit(cls, data: str) -> str:
+        """Computes the ICAO 9303 check digit for a given alphanumeric string."""
+        total = 0
+        for i, ch in enumerate(data.upper()):
+            val = cls.CHAR_VALUES.get(ch, 0)
+            weight = cls.WEIGHTS[i % 3]
+            total += val * weight
+        return str(total % 10)
+
+    @classmethod
+    def clean_mrz_line(cls, line: str) -> str:
+        """Sanitizes line by normalizing OCR misrecognitions for filler '<' and uppercase."""
+        # Common OCR errors for '<'
+        for ch in ['«', '»', '‹', '›', '{', '}', '[', ']', '(', ')']:
+            line = line.replace(ch, '<')
+        
+        # In trailing filler zone, lowercase c, e, o often misread for <
+        line = re.sub(r'[ce]{2,}', lambda m: '<' * len(m.group(0)), line)
+        line = re.sub(r'[^A-Za-z0-9<]', '', line).upper()
+        return line
+
+    @classmethod
+    def normalize_digits(cls, text: str) -> str:
+        """Corrects common OCR letter substitutions in strictly numeric MRZ fields."""
+        subs = {'O': '0', 'D': '0', 'Q': '0', 'I': '1', 'L': '1', 'Z': '2', 'S': '5', 'B': '8', '<': '0'}
+        res = []
+        for ch in text.upper():
+            res.append(subs.get(ch, ch))
+        return "".join(res)
+
+    @classmethod
+    def _reconstruct_length(cls, s: str, target_len: int) -> str:
+        """
+        Pads a short OCR'd MRZ line to target_len characters.
+
+        OCR reliably reads distinct/real characters but often undercounts a long
+        run of a single repeated glyph -- in practice, a string of consecutive
+        '<' filler characters gets merged/undercounted, even though the real
+        content immediately before AND after that run (e.g. the trailing
+        composite check digit) is read correctly. Blindly right-padding in that
+        case pushes the trailing real character out of its fixed ICAO 9303
+        position, corrupting checksum validation.
+
+        If a run of '<' exists anywhere in the string, the missing characters
+        are inserted into that run (preserving whatever comes after it);
+        otherwise falls back to plain right-padding.
+        """
+        if len(s) >= target_len:
+            return s[:target_len]
+        deficit = target_len - len(s)
+        runs = list(re.finditer(r'<+', s))
+        if runs:
+            start, end = runs[-1].span()
+            return s[:start] + ('<' * (end - start + deficit)) + s[end:]
+        return s.ljust(target_len, '<')
+
+    @classmethod
+    def parse_td3(cls, line1: str, line2: str) -> Dict[str, Any]:
+        """
+        Parses TD3 format (Passport, 2 lines of 44 characters).
+        Line 1:
+          P<[Country 3][Surname]<<[Given Names]...
+        Line 2:
+          [Doc# 9][Doc# CD 1][Nationality 3][DOB 6][DOB CD 1][Sex 1][Expiry 6][Expiry CD 1][Optional 15][Composite CD 1]
+        """
+        line1 = cls._reconstruct_length(cls.clean_mrz_line(line1), 44)
+        line2 = cls._reconstruct_length(cls.clean_mrz_line(line2), 44)
+
+        doc_type = line1[0:2].replace('<', '')
+        country = line1[2:5].replace('<', '')
+        
+        name_section = line1[5:]
+        name_parts = name_section.split('<<')
+        surname = name_parts[0].replace('<', ' ').strip()
+        given_names = ""
+        if len(name_parts) > 1:
+            given_names = name_parts[1].replace('<', ' ').strip()
+
+        # Line 2 fields
+        doc_number_raw = line2[0:9]
+        doc_number = doc_number_raw.replace('<', '')
+        doc_number_cd = cls.normalize_digits(line2[9])
+        
+        nationality = line2[10:13].replace('<', '')
+        
+        dob_raw = cls.normalize_digits(line2[13:19])
+        dob_cd = cls.normalize_digits(line2[19])
+        
+        sex = line2[20].replace('<', 'X')
+        if sex not in ['M', 'F', 'X']:
+            sex = 'M'
+        
+        expiry_raw = cls.normalize_digits(line2[21:27])
+        expiry_cd = cls.normalize_digits(line2[27])
+        
+        optional_raw = line2[28:43]
+        optional_data = optional_raw.replace('<', '')
+        
+        composite_cd = cls.normalize_digits(line2[43])
+
+        # Calculate actual checksums
+        calc_doc_cd = cls.compute_check_digit(doc_number_raw)
+        calc_dob_cd = cls.compute_check_digit(dob_raw)
+        calc_expiry_cd = cls.compute_check_digit(expiry_raw)
+        
+        # Composite string according to ICAO Doc 9303-4 (TD3):
+        # Doc Number (9) + check (1) + DOB (6) + check (1) + Expiry (6) + check (1) + Optional Data (14) + optional check (1) if applicable
+        # Or standard composite: line2[0:10] + line2[13:20] + line2[21:43]
+        composite_data = line2[0:10] + line2[13:20] + line2[21:43]
+        calc_composite_cd = cls.compute_check_digit(composite_data)
+
+        checksums = [
+            {
+                "field": "Document Number Checksum",
+                "value": doc_number_raw,
+                "check_digit": doc_number_cd,
+                "calculated_check_digit": calc_doc_cd,
+                "valid": doc_number_cd == calc_doc_cd
+            },
+            {
+                "field": "Date of Birth Checksum",
+                "value": dob_raw,
+                "check_digit": dob_cd,
+                "calculated_check_digit": calc_dob_cd,
+                "valid": dob_cd == calc_dob_cd
+            },
+            {
+                "field": "Expiry Date Checksum",
+                "value": expiry_raw,
+                "check_digit": expiry_cd,
+                "calculated_check_digit": calc_expiry_cd,
+                "valid": expiry_cd == calc_expiry_cd
+            },
+            {
+                "field": "Composite Checksum",
+                "value": "Composite Checksum Payload",
+                "check_digit": composite_cd,
+                "calculated_check_digit": calc_composite_cd,
+                "valid": composite_cd == calc_composite_cd
+            }
+        ]
+
+        all_valid = all(cs["valid"] for cs in checksums)
+
+        return {
+            "format": "TD3",
+            "line1": line1,
+            "line2": line2,
+            "document_type": doc_type or "P",
+            "country": country,
+            "surname": surname,
+            "given_names": given_names,
+            "document_number": doc_number,
+            "nationality": nationality,
+            "birth_date": dob_raw,
+            "sex": sex,
+            "expiry_date": expiry_raw,
+            "optional_data": optional_data,
+            "checksums": checksums,
+            "is_valid": all_valid
+        }
+
+    @classmethod
+    def extract_mrz_from_lines(cls, text_lines: List[str]) -> Optional[Dict[str, Any]]:
+        """Scans extracted OCR text lines to find candidate MRZ lines and parses them."""
+        cleaned = [cls.clean_mrz_line(l) for l in text_lines if l]
+        
+        # Look for 44-character TD3 pairs
+        for i in range(len(cleaned) - 1):
+            l1, l2 = cleaned[i], cleaned[i + 1]
+            if len(l1) >= 40 and len(l2) >= 40 and ('<' in l1 or '<' in l2):
+                if l1.startswith('P') or '<' in l1:
+                    return cls.parse_td3(l1, l2)
+
+        # Fallback: look for lines containing multiple '<<'
+        mrz_candidates = [l for l in cleaned if l.count('<') >= 4 and len(l) >= 30]
+        if len(mrz_candidates) >= 2:
+            return cls.parse_td3(mrz_candidates[0], mrz_candidates[1])
+
+        return None
+
+    @classmethod
+    def parse_pre_isolated_lines(cls, text_lines: List[str]) -> Optional[Dict[str, Any]]:
+        """
+        Parses lines that a caller has already isolated as the MRZ band (e.g. a
+        dedicated MRZ-region OCR pass -- see TesseractOCRService.extract_mrz_lines),
+        skipping extract_mrz_from_lines' whole-document scanning heuristic.
+
+        That heuristic requires ~40-character lines to avoid false-positives when
+        scanning arbitrary prose text, but a cropped, upscaled, restricted-charset
+        MRZ pass often doesn't capture a long run of near-invisible trailing '<'
+        filler even when every character it did read is correct -- parse_td3
+        right-pads short-but-accurate lines to 44 chars, so no length gate is
+        needed once the lines are already known to be the MRZ.
+        """
+        cleaned = [cls.clean_mrz_line(l) for l in text_lines if l]
+        if len(cleaned) >= 2:
+            return cls.parse_td3(cleaned[0], cleaned[1])
+        return None
