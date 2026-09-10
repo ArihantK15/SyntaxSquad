@@ -329,6 +329,7 @@ def process_risk_aggregation(case_id: str, db: Session = Depends(get_db)):
     case.risk_level = risk_res["risk_level"]
     case.recommendation = risk_res["recommendation"]
     case.status = f"{risk_res['risk_level']}_RISK" if risk_res["risk_level"] in ["LOW", "MEDIUM"] else ("CRITICAL" if risk_res["risk_level"] == "CRITICAL" else "REQUIRES_REVIEW")
+    analysis.risk_breakdown = risk_res["breakdown"]
 
     # Clear existing signals if re-evaluating, then insert new ones
     db.query(RiskSignal).filter(RiskSignal.case_id == case_id).delete()

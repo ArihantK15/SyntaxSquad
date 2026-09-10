@@ -211,6 +211,7 @@ def run_demo_scenario(scenario_key: str = Body(..., embed=True), db: Session = D
         validation_result=validation_data,
         tamper_result=tamper_result,
         face_result=face_result,
+        risk_breakdown=risk_res["breakdown"],
         processing_time_ms=2100.0
     )
     db.add(analysis)

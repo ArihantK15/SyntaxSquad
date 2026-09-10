@@ -10,7 +10,27 @@ import { TamperHeatmap } from '../components/TamperHeatmap';
 import { FaceVerification } from '../components/FaceVerification';
 import { EvidenceList } from '../components/EvidenceList';
 import { AuditTimeline } from '../components/AuditTimeline';
-import { ArrowLeft, Loader2, RefreshCw } from 'lucide-react';
+import { Tabs, TabItem } from '../components/Tabs';
+import {
+  ArrowLeft,
+  Loader2,
+  RefreshCw,
+  FileText,
+  ShieldCheck,
+  Flame,
+  ScanFace,
+  ListChecks,
+  History
+} from 'lucide-react';
+
+const DETAIL_TABS: TabItem[] = [
+  { id: 'ocr', label: 'OCR', icon: FileText },
+  { id: 'mrz', label: 'MRZ', icon: ShieldCheck },
+  { id: 'tamper', label: 'Tamper', icon: Flame },
+  { id: 'face', label: 'Face', icon: ScanFace },
+  { id: 'evidence', label: 'Evidence', icon: ListChecks },
+  { id: 'audit', label: 'Audit Trail', icon: History }
+];
 
 interface CaseDetailPageProps {
   caseId: string;
@@ -50,8 +70,12 @@ export const CaseDetailPage: React.FC<CaseDetailPageProps> = ({ caseId, onBack }
 
   const analysis = caseData.analyses && caseData.analyses.length > 0 ? caseData.analyses[0] : undefined;
 
-  // Extract risk breakdown if available or construct default breakdown
-  const riskBreakdown = [
+  // The risk engine persists its real per-factor weighted breakdown for any
+  // case that ran through the actual screening pipeline. The 20 pre-seeded
+  // demo cases never ran that pipeline, so they have no genuine per-signal
+  // data — for those (and only those), fall back to a rough client-side
+  // estimate rather than showing nothing.
+  const riskBreakdown = analysis?.risk_breakdown ?? [
     {
       factor: 'MRZ & Document Validation',
       weight: 0.25,
@@ -144,32 +168,37 @@ export const CaseDetailPage: React.FC<CaseDetailPageProps> = ({ caseId, onBack }
         </div>
       </div>
 
-      {/* Forensics & Deep-Dive Modules (2-column layout) */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Module 1: OCR Extraction */}
-        <OCRResults data={analysis?.ocr_result} />
-
-        {/* Module 2: ICAO MRZ Validation */}
-        <MRZValidator
-          mrz={analysis?.mrz_result}
-          validation={analysis?.validation_result}
-        />
-
-        {/* Module 3: Tamper AI (ELA Heatmap) */}
-        <TamperHeatmap
-          originalImageUrl={docImgUrl}
-          tamperResult={analysis?.tamper_result}
-        />
-
-        {/* Module 4: Biometric Face Verification */}
-        <FaceVerification faceResult={analysis?.face_result} />
-      </div>
-
-      {/* Evidence List & Risk Signals */}
-      <EvidenceList signals={caseData.risk_signals} />
-
-      {/* Chain of Custody & Audit Timeline */}
-      <AuditTimeline logs={caseData.audit_logs} />
+      {/* Forensics & Deep-Dive Modules: one at a time via tabs */}
+      <Tabs key={caseId} tabs={DETAIL_TABS} defaultTabId="ocr">
+        {(activeTabId) => {
+          switch (activeTabId) {
+            case 'ocr':
+              return <OCRResults data={analysis?.ocr_result} />;
+            case 'mrz':
+              return (
+                <MRZValidator
+                  mrz={analysis?.mrz_result}
+                  validation={analysis?.validation_result}
+                />
+              );
+            case 'tamper':
+              return (
+                <TamperHeatmap
+                  originalImageUrl={docImgUrl}
+                  tamperResult={analysis?.tamper_result}
+                />
+              );
+            case 'face':
+              return <FaceVerification faceResult={analysis?.face_result} />;
+            case 'evidence':
+              return <EvidenceList signals={caseData.risk_signals} />;
+            case 'audit':
+              return <AuditTimeline logs={caseData.audit_logs} />;
+            default:
+              return null;
+          }
+        }}
+      </Tabs>
     </div>
   );
 };

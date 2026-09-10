@@ -149,6 +149,7 @@ export interface DocumentAnalysis {
   validation_result?: ValidationResult;
   tamper_result?: TamperResult;
   face_result?: FaceVerificationResult;
+  risk_breakdown?: RiskFactorContribution[];
   processing_time_ms: number;
 }
 

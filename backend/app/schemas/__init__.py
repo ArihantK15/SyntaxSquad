@@ -163,6 +163,7 @@ class DocumentAnalysisOut(BaseModel):
     validation_result: Optional[Dict[str, Any]] = None
     tamper_result: Optional[Dict[str, Any]] = None
     face_result: Optional[Dict[str, Any]] = None
+    risk_breakdown: Optional[List[RiskFactorBreakdown]] = None
     processing_time_ms: float = 0.0
 
     model_config = ConfigDict(from_attributes=True)

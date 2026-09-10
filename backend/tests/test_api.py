@@ -42,6 +42,19 @@ def test_demo_scenario_execution():
     assert detail["case_number"] == data["case_number"]
     assert len(detail["analyses"]) > 0
 
+    # The risk engine's real per-factor breakdown must be persisted on the
+    # analysis record, not just returned transiently by the risk step.
+    breakdown = detail["analyses"][0]["risk_breakdown"]
+    assert breakdown is not None
+    assert len(breakdown) == 5
+    factor_names = {b["factor"] for b in breakdown}
+    assert "Forensic Tamper AI" in factor_names
+    assert "Biometric Face Verification" in factor_names
+    for factor in breakdown:
+        assert "weight" in factor
+        assert "raw_risk" in factor
+        assert "weighted_contribution" in factor
+
 def test_officer_decision_recording():
     # Fetch first case
     cases_res = client.get("/api/cases?limit=1")

@@ -48,6 +48,7 @@ class DocumentAnalysis(Base):
     validation_result = Column(JSON, nullable=True)
     tamper_result = Column(JSON, nullable=True)
     face_result = Column(JSON, nullable=True)
+    risk_breakdown = Column(JSON, nullable=True)
     
     processing_time_ms = Column(Float, default=0.0)
 
