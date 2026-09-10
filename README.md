@@ -69,7 +69,7 @@ IMMUTABLE AUDIT TRAIL (Chain of Custody Event Ledger)
 - **Signal B — Edge Discontinuity & Splicing:** Laplacian high-frequency gradient variance to identify pasted rectangular patches.
 - **Signal C — Portrait Seam Analysis:** Boundary gradient consistency check around the photo perimeter to detect photo replacement.
 - **Signal D — Text Compression Inconsistency:** Compares ELA compression ratios between MRZ and document body.
-- **Signal E — Lightweight CNN:** 3-layer Convolutional Neural Network patch classifier, sampled across the portrait/center/MRZ regions (not just the document center, where tampering rarely occurs). Its output is only used once trained on `scripts/train_tamper_cnn.py`'s synthetic splice-forgery dataset — an untrained network is deliberately excluded from the score rather than mixed in as noise. Until trained, Signals A–D above carry tamper detection alone.
+- **Signal E — Lightweight CNN:** 3-layer Convolutional Neural Network patch classifier, sampled across the portrait/center/MRZ regions (not just the document center, where tampering rarely occurs). An untrained network is deliberately excluded from the score rather than mixed in as noise — `TamperDetectionService` only uses its output once a trained checkpoint exists (`backend/app/ml/weights/tamper_cnn.pth`, committed to this repo). Trained via `scripts/train_tamper_cnn.py` on a blend of the synthetic splice-forgery generator's patches and real human-made splices from the CASIA v2.0 image tampering dataset (real photographs, not documents, but a far less predictable splice signature than synthetic rectangular copy-paste alone) — **87.8% validation accuracy**. Re-run training yourself with `CASIA2_DIR=<path to extracted CASIA2> PYTHONPATH=backend python scripts/train_tamper_cnn.py` (falls back to synthetic-only if `CASIA2_DIR` is unset).
 
 ### Module 4 — Biometric Face Verification
 - **Portrait Extraction:** Isolates face crop from travel document.
@@ -248,7 +248,7 @@ Use the top toolbar **"Demo scenario"** selector to demonstrate predefined test 
 
 1. **Genuine Document:** Real photo, valid checksums, matching live face $\rightarrow$ `LOW RISK — CLEAR FOR ENTRY` (face similarity ~0.99 MATCH, no tamper signals).
 2. **MRZ Tampering:** Intentionally corrupted check digits in line 2 $\rightarrow$ `HIGH RISK — SECONDARY INSPECTION` (checksum-invalid CRITICAL signal floors the score regardless of a clean face/tamper result).
-3. **Photo Replacement:** Document photo is Person A, live capture is Person B — a genuine biometric mismatch, not a scripted one $\rightarrow$ `MEDIUM RISK — ROUTINE VERIFICATION` (face similarity ~0.64 REVIEW_REQUIRED, plus a real edge-discontinuity splice signal).
+3. **Photo Replacement:** Document photo is Person A, live capture is Person B — a genuine biometric mismatch, not a scripted one $\rightarrow$ `HIGH RISK — SECONDARY INSPECTION` (face similarity ~0.64 REVIEW_REQUIRED, plus multiple real edge-discontinuity splice signals now confirmed by the trained tamper CNN — confident enough to trip the CRITICAL tamper verdict and the critical-signal floor below).
 4. **Expired Document:** Travel validity expired before present calendar date $\rightarrow$ `HIGH RISK — SECONDARY INSPECTION` (an expired document is a CRITICAL, deterministic rule violation, floored to HIGH regardless of how clean the biometric/tamper signals are).
 5. **Multiple Anomalies:** Tampered MRZ + mismatched face + simulated watchlist hit $\rightarrow$ `HIGH RISK — SECONDARY INSPECTION`.
 

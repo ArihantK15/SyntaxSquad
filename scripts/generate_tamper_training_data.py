@@ -21,7 +21,7 @@ import sys
 import random
 import tempfile
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -160,6 +160,98 @@ def generate_dataset(n_docs: int = 60, patches_per_doc: int = 6, seed: int = 42)
                     continue
                 patches.append(_random_patch(spliced_img))
                 labels.append(0)
+
+    return np.stack(patches).astype(np.uint8), np.array(labels, dtype=np.int64)
+
+
+def _patch_centered_at(img: np.ndarray, cx: int, cy: int) -> np.ndarray:
+    """Extracts a PATCH_SIZE x PATCH_SIZE RGB patch centered at (cx, cy), clamped to bounds."""
+    h, w = img.shape[:2]
+    x1 = max(0, min(w - PATCH_SIZE, cx - PATCH_SIZE // 2))
+    y1 = max(0, min(h - PATCH_SIZE, cy - PATCH_SIZE // 2))
+    patch = img[y1:y1 + PATCH_SIZE, x1:x1 + PATCH_SIZE]
+    if patch.shape[:2] != (PATCH_SIZE, PATCH_SIZE):
+        patch = cv2.resize(patch, (PATCH_SIZE, PATCH_SIZE))
+    return cv2.cvtColor(patch, cv2.COLOR_BGR2RGB)
+
+
+def load_casia_patches(
+    casia_root: str,
+    n_authentic: Optional[int] = None,
+    n_tampered: Optional[int] = None,
+    patches_per_image: int = 2,
+    seed: int = 42,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Samples labeled 64x64 patches from the CASIA v2.0 image tampering
+    detection dataset (real photographs, real human-made splices -- not
+    documents, but a far richer and less predictable splice signature than
+    our own synthetic generator's plain rectangular copy-paste). Get it via:
+
+        kaggle datasets download -d divg07/casia-20-image-tampering-detection-dataset -p <dir> --unzip
+
+    Expects the standard CASIA2 layout under `casia_root`:
+        Au/                       authentic photos
+        Tp/                       tampered photos
+        CASIA 2 Groundtruth/      per-tampered-image binary masks, named
+                                   "<tp_filename_without_ext>_gt.png"
+
+    Authentic patches are random crops from Au/ images. Tampered patches are
+    centered on actual masked (truly-spliced) pixels -- sampled directly from
+    the mask's nonzero coordinates rather than its bounding box, since CASIA
+    masks are often irregular shapes where the bounding box contains plenty
+    of untouched background; centering on the box instead of the mask itself
+    would mislabel clean patches as tampered. n_authentic/n_tampered default
+    to None, meaning use every available image (the model is tiny -- a few
+    tens of thousands of parameters -- so wall-clock time is dominated by
+    image I/O, not training compute; there's no accuracy reason to subsample
+    a real, labeled dataset). A handful of files in this dataset are known to
+    be corrupt/truncated; those are skipped rather than failing the whole run.
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+
+    root = Path(casia_root)
+    au_dir, tp_dir, gt_dir = root / "Au", root / "Tp", root / "CASIA 2 Groundtruth"
+
+    au_files = [f for f in au_dir.iterdir() if f.suffix.lower() in (".jpg", ".jpeg", ".bmp")]
+    tp_files = [f for f in tp_dir.iterdir() if f.suffix.lower() in (".jpg", ".jpeg", ".tif", ".tiff")]
+    random.shuffle(au_files)
+    random.shuffle(tp_files)
+    if n_authentic is not None:
+        au_files = au_files[:n_authentic]
+    if n_tampered is not None:
+        tp_files = tp_files[:n_tampered]
+
+    patches: List[np.ndarray] = []
+    labels: List[int] = []
+
+    for f in au_files:
+        img = cv2.imread(str(f))
+        if img is None or img.shape[0] < PATCH_SIZE or img.shape[1] < PATCH_SIZE:
+            continue
+        for _ in range(patches_per_image):
+            patches.append(_random_patch(img))
+            labels.append(0)
+
+    for f in tp_files:
+        gt_path = gt_dir / f"{f.stem}_gt.png"
+        if not gt_path.exists():
+            continue
+        img = cv2.imread(str(f))
+        mask = cv2.imread(str(gt_path), cv2.IMREAD_GRAYSCALE)
+        if img is None or mask is None or img.shape[0] < PATCH_SIZE or img.shape[1] < PATCH_SIZE:
+            continue
+        ys, xs = np.nonzero(mask > 10)
+        if len(xs) == 0:
+            continue
+        # Sample patch centers directly from true mask pixels, jittering the
+        # index (not the pixel coordinate) so we still cover the mask's
+        # extent rather than always the same spot.
+        idxs = np.random.choice(len(xs), size=patches_per_image, replace=True)
+        for idx in idxs:
+            patches.append(_patch_centered_at(img, int(xs[idx]), int(ys[idx])))
+            labels.append(1)
 
     return np.stack(patches).astype(np.uint8), np.array(labels, dtype=np.int64)
 
