@@ -75,7 +75,7 @@ export const OCRResults: React.FC<OCRResultsProps> = ({ data }) => {
           onClick={() => setShowRaw(!showRaw)}
           className="flex items-center justify-between w-full text-xs font-mono text-slate-400 hover:text-slate-200 transition-colors py-1 cursor-pointer"
         >
-          <span>Raw Extracted OCR Buffer ({data.detected_lines.length} lines)</span>
+          <span>Raw Extracted OCR Buffer ({data.detected_lines?.length ?? 0} lines)</span>
           {showRaw ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
         </button>
 
