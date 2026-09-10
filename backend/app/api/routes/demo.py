@@ -1,4 +1,5 @@
 import os
+import re
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.orm import Session
@@ -244,6 +245,26 @@ def run_demo_scenario(scenario_key: str = Body(..., embed=True), db: Session = D
     }
 
 
+# Matches the jurisdiction dropdown in frontend/src/pages/ScreeningPage.tsx.
+# Falls back to deriving a plausible 3-letter code for any other free-text
+# country name, since the generator itself accepts arbitrary strings.
+KNOWN_COUNTRY_CODES = {
+    "REPUBLIC OF UTOPIA": "UTO",
+    "DEMO STATE": "DEM",
+    "ATLANTIS FEDERATION": "ATL",
+    "INDIA": "IND",
+    "UNITED KINGDOM": "GBR",
+}
+
+
+def _country_code_for(country_name: str) -> str:
+    known = KNOWN_COUNTRY_CODES.get(country_name.strip().upper())
+    if known:
+        return known
+    letters = re.sub(r'[^A-Z]', '', country_name.upper())
+    return (letters + "XXX")[:3] if letters else "UTO"
+
+
 @router.post("/generate-doc")
 def generate_specimen_doc(
     mode: str = Body("genuine", embed=True),
@@ -255,13 +276,21 @@ def generate_specimen_doc(
     """Utility to generate a download-ready synthetic document."""
     fname = f"specimen_{uuid.uuid4().hex[:6]}.jpg"
     out_path = os.path.join(settings.UPLOAD_DIR, "documents", fname)
+    # country_code/nationality previously defaulted to "UTO"/"UTOPIAN"
+    # unconditionally (they were never derived from country_name), so any
+    # jurisdiction other than the default rendered an internally
+    # inconsistent document -- header said e.g. "ATLANTIS FEDERATION" while
+    # the printed NATIONALITY field and MRZ country code both said UTO.
+    country_code = _country_code_for(country_name)
     info = SyntheticDocumentGenerator.generate_document(
         out_path=out_path,
         mode=mode,
         surname=surname,
         given_names=given_names,
         doc_number=doc_number,
-        country_name=country_name
+        country_name=country_name,
+        country_code=country_code,
+        nationality=f"{country_code} CITIZEN"
     )
     return {
         "filename": fname,

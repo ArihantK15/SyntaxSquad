@@ -109,8 +109,42 @@ class TesseractOCRService(BaseOCRService):
         # lines that plausibly are MRZ rather than OCR noise.
         return [line for line in candidates if len(line) >= 20 and '<' in line]
 
+    @staticmethod
+    def _value_after_label(lines: List[str], keyword_pattern: str) -> Optional[str]:
+        """
+        Our synthetic documents render every field as a label line immediately
+        followed by its value line (see SyntheticDocumentGenerator: label at
+        y, value at y+18). Anchoring on the label's distinctive French half
+        (e.g. "NOM", "NAISSANCE") and reading the line below it survives
+        Tesseract garbling the English half of the label -- which regexing
+        over the whole raw-text blob for the value itself cannot, since a
+        mangled label often still contains real letters that a value-shaped
+        pattern can accidentally match.
+        """
+        pattern = re.compile(keyword_pattern, re.IGNORECASE)
+        for i, line in enumerate(lines):
+            if pattern.search(line) and i + 1 < len(lines):
+                return lines[i + 1].strip()
+        return None
+
+    @staticmethod
+    def _extract_date(value_line: Optional[str]) -> Optional[str]:
+        """
+        Parses a date from a single labeled value line with a separator-
+        tolerant pattern (day/month/year each 1-2 digits, 0-2 arbitrary
+        non-digit separator characters between them) rather than requiring
+        exact DD/MM/YYYY -- Tesseract sometimes drops a separator entirely
+        (e.g. "01/01/2000" -> "0101/2000"), which a strict pattern misses.
+        """
+        if not value_line:
+            return None
+        m = re.search(r'(\d{1,2})\D{0,2}(\d{1,2})\D{0,2}(\d{4})', value_line)
+        if not m:
+            return None
+        return f"{m.group(1).zfill(2)}/{m.group(2).zfill(2)}/{m.group(3)}"
+
     def parse_fields_from_text(self, raw_text: str, lines: List[str]) -> Dict[str, Any]:
-        """Extracts structured document fields using regex and heuristic matching."""
+        """Extracts structured document fields, anchored on each field's own label line."""
         fields: Dict[str, Any] = {
             "full_name": None,
             "document_number": None,
@@ -127,40 +161,28 @@ class TesseractOCRService(BaseOCRService):
         if doc_no_match:
             fields["document_number"] = doc_no_match.group(1)
 
-        # Dates (DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY, or YYYY-MM-DD)
-        dates_found = re.findall(r'\b(\d{2}[/\-\.]\d{2}[/\-\.]\d{4}|\d{4}[/\-\.]\d{2}[/\-\.]\d{2})\b', raw_text)
-        if len(dates_found) >= 3:
-            fields["date_of_birth"] = dates_found[0]
-            fields["date_of_issue"] = dates_found[1]
-            fields["date_of_expiry"] = dates_found[2]
-        elif len(dates_found) == 2:
-            fields["date_of_birth"] = dates_found[0]
-            fields["date_of_expiry"] = dates_found[1]
-        elif len(dates_found) == 1:
-            fields["date_of_birth"] = dates_found[0]
+        fields["date_of_birth"] = self._extract_date(self._value_after_label(lines, r'\bNAISSANCE\b'))
+        # No leading \b: the apostrophe in "D'EXPIRATION" is frequently
+        # dropped by OCR, fusing it into "DEXPIRATION" with no word boundary
+        # before EXPIRATION itself -- only require the trailing boundary.
+        fields["date_of_expiry"] = self._extract_date(self._value_after_label(lines, r'EXPIRATION\b'))
 
-        # Nationality & Country heuristics
-        countries = ["UTOPIA", "INDIA", "UNITED STATES", "UNITED KINGDOM", "CANADA", "SINGAPORE", "AUSTRALIA", "GERMANY", "FRANCE", "DEMO STATE"]
-        for c in countries:
-            if c in raw_text.upper():
-                fields["country"] = c
-                fields["nationality"] = c
-                break
+        fields["country"] = self._value_after_label(lines, r'\bPAYS\b')
+        fields["nationality"] = self._value_after_label(lines, r'\bNATIONALITE\b')
 
-        # Sex heuristics
-        if re.search(r'\bSEX[:\s]+([MFX])\b', raw_text, re.IGNORECASE):
-            fields["sex"] = re.search(r'\bSEX[:\s]+([MFX])\b', raw_text, re.IGNORECASE).group(1).upper()
-        elif " M " in raw_text or "/M/" in raw_text:
-            fields["sex"] = "M"
-        elif " F " in raw_text or "/F/" in raw_text:
-            fields["sex"] = "F"
+        sex_value = self._value_after_label(lines, r'\bSEXE\b')
+        if sex_value and sex_value[:1].upper() in ("M", "F", "X"):
+            fields["sex"] = sex_value[:1].upper()
 
-        # Full Name extraction heuristic
-        name_match = re.search(r'(?:NAME|SURNAME|GIVEN NAMES?)[:\s]+([A-Z\s]{3,30})', raw_text, re.IGNORECASE)
-        if name_match:
-            fields["full_name"] = name_match.group(1).strip()
+        surname = self._value_after_label(lines, r'\bNOM\b')
+        given_names = self._value_after_label(lines, r'\bPRENOM')
+        if surname and given_names:
+            fields["full_name"] = f"{surname} {given_names}"
+        elif surname or given_names:
+            fields["full_name"] = surname or given_names
         else:
-            # Check upper case lines before MRZ
+            # Fallback for documents that don't follow our label-above-value
+            # layout: scan upper case lines before the MRZ.
             for line in lines[:8]:
                 clean_l = line.strip()
                 if len(clean_l) > 4 and clean_l.isupper() and not any(k in clean_l for k in ["PASSPORT", "REPUBLIC", "DEMO", "TRAVEL", "DOCUMENT"]):

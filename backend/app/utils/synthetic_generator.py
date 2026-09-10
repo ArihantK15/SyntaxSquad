@@ -22,6 +22,31 @@ class SyntheticDocumentGenerator:
     WIDTH = 1000
     HEIGHT = 650
 
+    _FONT_CANDIDATES = [
+        "/System/Library/Fonts/Helvetica.ttc",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    ]
+
+    @classmethod
+    def _load_font(cls, size: int) -> ImageFont.FreeTypeFont:
+        """
+        PIL's font-less draw.text() falls back to a fixed ~10px bitmap font
+        that doesn't scale -- fine for a screen mockup, but it's exactly the
+        kind of small, low-fidelity glyph rendering that produces marginal,
+        easily-misread characters under Tesseract (observed: a single '5'
+        misread as '6' in a document number, entirely a rendering artifact
+        rather than anything-wrong with the OCR pass itself). Use a real
+        scalable font at a deliberately readable size everywhere text needs
+        to survive OCR, the same way the MRZ line already does.
+        """
+        for candidate in cls._FONT_CANDIDATES:
+            if os.path.exists(candidate):
+                try:
+                    return ImageFont.truetype(candidate, size)
+                except Exception:
+                    continue
+        return ImageFont.load_default(size=size)
+
     @classmethod
     def _paste_photo(cls, img: Image.Image, photo_path: str, x: int, y: int, w: int, h: int):
         """
@@ -168,6 +193,7 @@ class SyntheticDocumentGenerator:
             ("SURNAME / NOM", surname),
             ("GIVEN NAMES / PRENOMS", given_names),
             ("NATIONALITY / NATIONALITE", nationality),
+            ("COUNTRY OF ISSUE / PAYS", country_name),
             ("DOCUMENT NO / NO DU PASSEPORT", doc_number),
             ("DATE OF BIRTH / DATE DE NAISSANCE", f"{dob_yymmdd[4:6]}/{dob_yymmdd[2:4]}/20{dob_yymmdd[:2]}"),
             ("SEX / SEXE", sex),
@@ -177,16 +203,18 @@ class SyntheticDocumentGenerator:
         if mode == "expired":
             # Change expiry to 2022
             expiry_yymmdd = "220101"
-            fields[6] = ("DATE OF EXPIRY / DATE D'EXPIRATION", "01/01/2022")
+            fields[7] = ("DATE OF EXPIRY / DATE D'EXPIRATION", "01/01/2022")
 
         if mode == "altered_text":
             # Tamper visual expiry date to 2035 while MRZ stays 2030
-            fields[6] = ("DATE OF EXPIRY / DATE D'EXPIRATION", "01/01/2035")
+            fields[7] = ("DATE OF EXPIRY / DATE D'EXPIRATION", "01/01/2035")
 
+        label_font = cls._load_font(12)
+        value_font = cls._load_font(18)
         cur_y = 95
         for label, val in fields:
-            draw.text((left_text, cur_y), label, fill=(100, 116, 139))
-            draw.text((left_text, cur_y + 18), str(val), fill=(15, 23, 42))
+            draw.text((left_text, cur_y), label, fill=(100, 116, 139), font=label_font)
+            draw.text((left_text, cur_y + 18), str(val), fill=(15, 23, 42), font=value_font)
             cur_y += 48
 
         # 5. Security emblem stamp watermark
