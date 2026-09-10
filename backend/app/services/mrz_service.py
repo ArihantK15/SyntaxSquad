@@ -123,9 +123,18 @@ class MRZService:
         calc_expiry_cd = cls.compute_check_digit(expiry_raw)
         
         # Composite string according to ICAO Doc 9303-4 (TD3):
-        # Doc Number (9) + check (1) + DOB (6) + check (1) + Expiry (6) + check (1) + Optional Data (14) + optional check (1) if applicable
-        # Or standard composite: line2[0:10] + line2[13:20] + line2[21:43]
-        composite_data = line2[0:10] + line2[13:20] + line2[21:43]
+        # Doc Number (9) + check (1) + DOB (6) + check (1) + Expiry (6) + check (1) + Optional Data (15)
+        #
+        # Built from the already-normalized field values above rather than raw
+        # line2 slices: an OCR digit/letter confusion in the DOB or expiry
+        # field (e.g. '0' misread as 'O') is exactly what normalize_digits
+        # corrects for the individual field checksums, which is why those
+        # pass -- but computing the composite from the raw, un-normalized
+        # slice re-introduces the same corruption ('O' and '0' have different
+        # ICAO character values), spuriously failing composite validation on
+        # an entirely genuine document. doc_number_raw itself is intentionally
+        # NOT normalized -- document numbers legitimately contain letters.
+        composite_data = doc_number_raw + doc_number_cd + dob_raw + dob_cd + expiry_raw + expiry_cd + optional_raw
         calc_composite_cd = cls.compute_check_digit(composite_data)
 
         checksums = [

@@ -79,6 +79,40 @@ def test_reconstruct_length_pads_the_filler_run_not_the_end():
     assert reconstructed == full_line2
 
 
+def test_composite_checksum_survives_ocr_digit_letter_confusion():
+    """
+    Reproduces a real failure found on a genuine generated specimen: OCR
+    misread the first digit of the date-of-birth field ('0' -> 'O'). The
+    individual Date of Birth checksum already correctly normalizes this
+    (normalize_digits converts O->0 before computing/comparing), so it
+    passes. But the composite checksum was computed from a raw line2 slice
+    (line2[13:20]) that still contained the un-normalized 'O' -- 'O' and '0'
+    have different ICAO character values (24 vs 0), so the composite sum
+    came out wrong even though the document is entirely genuine and every
+    individual field checksum is valid. This is a false tampering signal on
+    a clean document, triggered by completely ordinary OCR noise the rest of
+    the parser is specifically designed to tolerate.
+    """
+    line1 = "P<UTOKAUL<<ARIHANT<<<<<<<<<<<<<<<<<<<<<<"
+    doc_raw, dob_raw, exp_raw = "X1234567<", "000101", "300101"
+    doc_cd = MRZService.compute_check_digit(doc_raw)
+    dob_cd = MRZService.compute_check_digit(dob_raw)
+    exp_cd = MRZService.compute_check_digit(exp_raw)
+    opt_raw = "<" * 15
+    comp_cd = MRZService.compute_check_digit(doc_raw + doc_cd + dob_raw + dob_cd + exp_raw + exp_cd + opt_raw)
+
+    # OCR misread the DOB field's leading '0' as the letter 'O'.
+    ocr_dob_raw = "O00101"
+    line2 = f"{doc_raw}{doc_cd}UTO{ocr_dob_raw}{dob_cd}M{exp_raw}{exp_cd}{opt_raw}{comp_cd}"
+
+    result = MRZService.parse_td3(line1, line2)
+    dob_cs = [cs for cs in result["checksums"] if "Date of Birth" in cs["field"]][0]
+    comp_cs = [cs for cs in result["checksums"] if "Composite" in cs["field"]][0]
+    assert dob_cs["valid"] is True
+    assert comp_cs["valid"] is True
+    assert result["is_valid"] is True
+
+
 def test_parse_pre_isolated_lines_handles_short_ocr_output():
     """A dedicated MRZ-band OCR pass may return lines shorter than 44 chars if
     the trailing filler run was undercounted; parse_pre_isolated_lines must
