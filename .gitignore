@@ -28,3 +28,6 @@ demo_output/
 
 # Environment variables
 .env
+
+# Git worktrees
+.worktrees/
