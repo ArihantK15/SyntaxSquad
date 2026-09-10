@@ -248,7 +248,7 @@ Use the top toolbar **"Demo scenario"** selector to demonstrate predefined test 
 
 1. **Genuine Document:** Real photo, valid checksums, matching live face $\rightarrow$ `LOW RISK — CLEAR FOR ENTRY` (face similarity ~0.99 MATCH, no tamper signals).
 2. **MRZ Tampering:** Intentionally corrupted check digits in line 2 $\rightarrow$ `HIGH RISK — SECONDARY INSPECTION` (checksum-invalid CRITICAL signal floors the score regardless of a clean face/tamper result).
-3. **Photo Replacement:** Document photo is Person A, live capture is Person B — a genuine biometric mismatch, not a scripted one $\rightarrow$ `HIGH RISK — SECONDARY INSPECTION` (face similarity ~0.64 REVIEW_REQUIRED, plus multiple real edge-discontinuity splice signals now confirmed by the trained tamper CNN — confident enough to trip the CRITICAL tamper verdict and the critical-signal floor below).
+3. **Photo Replacement:** Document photo is Person A, live capture is Person B — a genuine biometric mismatch, not a scripted one $\rightarrow$ `MEDIUM RISK — ROUTINE VERIFICATION` (face similarity ~0.64 REVIEW_REQUIRED, plus a real edge-discontinuity splice signal).
 4. **Expired Document:** Travel validity expired before present calendar date $\rightarrow$ `HIGH RISK — SECONDARY INSPECTION` (an expired document is a CRITICAL, deterministic rule violation, floored to HIGH regardless of how clean the biometric/tamper signals are).
 5. **Multiple Anomalies:** Tampered MRZ + mismatched face + simulated watchlist hit $\rightarrow$ `HIGH RISK — SECONDARY INSPECTION`.
 
