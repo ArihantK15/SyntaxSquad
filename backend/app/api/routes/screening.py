@@ -17,6 +17,7 @@ from app.services.face_service import get_face_service
 from app.services.watchlist_service import get_watchlist_provider
 from app.services.risk_engine import get_risk_engine
 from app.services.audit_service import AuditService
+from app.core.demo_faces import PERSON_A
 
 router = APIRouter(prefix="/screening", tags=["screening"])
 
@@ -256,10 +257,17 @@ async def process_face_verification(
         with open(live_face_path, "wb") as f:
             f.write(contents)
     else:
-        # If no custom live image uploaded, check if analysis has one or generate matching demo capture
+        # No custom live image uploaded: auto-simulate a capture. Without a
+        # real embedded face here, MTCNN can't detect a face in the
+        # hand-drawn avatar fallback at all -- comparing it against the
+        # document photo (also a real face since the fix in
+        # generate_specimen_doc) would silently produce a meaningless
+        # similarity score. Use the same demo person as the document photo
+        # so the default (nothing customized) is a genuine MATCH rather
+        # than an undetectable non-comparison.
         live_face_path = os.path.join(settings.UPLOAD_DIR, "faces", f"{case_id}_live.jpg")
         from app.utils.synthetic_generator import SyntheticDocumentGenerator
-        SyntheticDocumentGenerator.generate_live_face_image(live_face_path, variant=1)
+        SyntheticDocumentGenerator.generate_live_face_image(live_face_path, face_photo_path=PERSON_A)
 
     analysis.face_image_path = live_face_path
 

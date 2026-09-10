@@ -18,18 +18,9 @@ from app.services.watchlist_service import get_watchlist_provider
 from app.services.risk_engine import get_risk_engine
 from app.services.audit_service import AuditService
 from app.core.security import hash_identifier
+from app.core.demo_faces import PERSON_A, PERSON_B
 
 router = APIRouter(prefix="/demo", tags=["demo"])
-
-# Real (AI-generated, non-real-person) face photos used for scenarios where a
-# genuine biometric face-verification result matters. Hand-drawn cartoon
-# avatars don't carry enough facial structure for a properly trained deep face
-# model to discriminate on -- it correctly treats two flat vector portraits as
-# "the same face" regardless of color/proportion differences, so a real photo
-# is needed to demonstrate an actual match or mismatch.
-_DEMO_FACES_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "demo-data", "faces"))
-PERSON_A = os.path.join(_DEMO_FACES_DIR, "person_a.jpg")
-PERSON_B = os.path.join(_DEMO_FACES_DIR, "person_b.jpg")
 
 SCENARIO_CONFIGS = {
     "genuine": {
@@ -290,7 +281,14 @@ def generate_specimen_doc(
         doc_number=doc_number,
         country_name=country_name,
         country_code=country_code,
-        nationality=f"{country_code} CITIZEN"
+        nationality=f"{country_code} CITIZEN",
+        # Without a real embedded face, MTCNN can't detect a face in the
+        # hand-drawn avatar fallback at all -- face verification against a
+        # New Screening-generated specimen would silently compare two
+        # undetected avatar crops via a real face model and present a
+        # meaningless similarity score as if it were a genuine result. See
+        # app.core.demo_faces for why a real (AI-generated) photo is needed.
+        face_photo_path=PERSON_A
     )
     return {
         "filename": fname,
