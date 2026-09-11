@@ -2,6 +2,8 @@ from datetime import datetime, date
 from typing import Dict, Any, List, Optional
 import re
 
+from app.utils.text_similarity import fuzzy_equal
+
 class DocumentRulesEngine:
     """
     Configurable rules engine validating document consistency and integrity.
@@ -171,8 +173,19 @@ class DocumentRulesEngine:
         if ocr_doc_no and mrz_doc_no:
             clean_ocr_no = re.sub(r'[^A-Za-z0-9]', '', ocr_doc_no).upper()
             clean_mrz_no = re.sub(r'[^A-Za-z0-9]', '', mrz_doc_no).upper()
-            
-            if clean_ocr_no != clean_mrz_no and clean_ocr_no not in clean_mrz_no and clean_mrz_no not in clean_ocr_no:
+
+            # The visual zone and the MRZ line are two independent OCR passes
+            # over the same physical number -- each can misread a different
+            # character. Tolerate a single-edit difference between them
+            # (bounded, length-gated) rather than flagging ordinary OCR noise
+            # as a document inconsistency.
+            is_consistent = (
+                clean_ocr_no == clean_mrz_no
+                or clean_ocr_no in clean_mrz_no
+                or clean_mrz_no in clean_ocr_no
+                or fuzzy_equal(clean_ocr_no, clean_mrz_no)
+            )
+            if not is_consistent:
                 results.append({
                     "rule": "DOC_NUMBER_CROSSCHECK",
                     "passed": False,

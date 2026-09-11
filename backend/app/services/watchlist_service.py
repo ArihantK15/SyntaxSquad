@@ -2,22 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, List
 import re
 
-
-def _levenshtein(a: str, b: str) -> int:
-    """Small edit-distance helper (no extra dependency needed for short IDs/names)."""
-    if a == b:
-        return 0
-    prev = list(range(len(b) + 1))
-    for i, ca in enumerate(a, 1):
-        curr = [i] + [0] * len(b)
-        for j, cb in enumerate(b, 1):
-            curr[j] = min(
-                prev[j] + 1,
-                curr[j - 1] + 1,
-                prev[j - 1] + (0 if ca == cb else 1)
-            )
-        prev = curr
-    return prev[len(b)]
+from app.utils.text_similarity import fuzzy_equal
 
 
 class WatchlistProvider(ABC):
@@ -75,14 +60,6 @@ class MockWatchlistProvider(WatchlistProvider):
     FUZZY_MAX_DISTANCE = 1
     FUZZY_MIN_LENGTH = 6
 
-    @classmethod
-    def _fuzzy_equal(cls, a: str, b: str) -> bool:
-        if not a or not b:
-            return False
-        if len(a) < cls.FUZZY_MIN_LENGTH or abs(len(a) - len(b)) > cls.FUZZY_MAX_DISTANCE:
-            return False
-        return _levenshtein(a, b) <= cls.FUZZY_MAX_DISTANCE
-
     def check_watchlist(self, full_name: Optional[str], document_number: Optional[str]) -> Optional[Dict[str, Any]]:
         clean_doc = re.sub(r'[^A-Za-z0-9]', '', document_number or '').upper()
         clean_name = re.sub(r'[^A-Za-z\s]', '', full_name or '').upper().strip()
@@ -92,7 +69,7 @@ class MockWatchlistProvider(WatchlistProvider):
             entry_name = entry["name"].upper()
 
             # Check document number match or name match
-            if clean_doc and (entry_doc == clean_doc or self._fuzzy_equal(entry_doc, clean_doc)):
+            if clean_doc and (entry_doc == clean_doc or fuzzy_equal(entry_doc, clean_doc, self.FUZZY_MAX_DISTANCE, self.FUZZY_MIN_LENGTH)):
                 return {
                     "matched": True,
                     "provider": self.LABEL,
@@ -101,7 +78,7 @@ class MockWatchlistProvider(WatchlistProvider):
                     "explanation": f"Document ID matched simulated test record {entry['watchlist_id']} ({entry['category']})."
                 }
 
-            if clean_name and (entry_name == clean_name or entry_name in clean_name or self._fuzzy_equal(entry_name, clean_name)):
+            if clean_name and (entry_name == clean_name or entry_name in clean_name or fuzzy_equal(entry_name, clean_name, self.FUZZY_MAX_DISTANCE, self.FUZZY_MIN_LENGTH)):
                 return {
                     "matched": True,
                     "provider": self.LABEL,

@@ -56,3 +56,41 @@ def test_document_rules_mismatch():
     }
     eval_res = DocumentRulesEngine.evaluate(ocr_data, mrz_data)
     assert any("Document Number Inconsistency" in s["signal"] for s in eval_res["signals"])
+
+def test_document_number_crosscheck_survives_single_ocr_slip():
+    """
+    The visual-zone text and the MRZ line are two INDEPENDENT OCR passes over
+    the same physical document number -- each can misread a different
+    character. The old exact-or-substring check had no tolerance for this,
+    so a single-character OCR slip in either pass alone (with no actual
+    document tampering) would fire a false HIGH-severity "Document Number
+    Inconsistency" signal, exactly the same OCR-noise-intolerance bug already
+    fixed tonight for the MRZ composite checksum, nationality code, and
+    watchlist matching.
+    """
+    ocr_data = {"fields": {"document_number": "X1B34567"}}  # '2' misread as 'B'
+    mrz_data = {
+        "surname": "KAUL",
+        "document_number": "X1234567",
+        "nationality": "UTO",
+        "birth_date": "000101",
+        "expiry_date": "300101",
+        "checksums": []
+    }
+    eval_res = DocumentRulesEngine.evaluate(ocr_data, mrz_data)
+    assert not any("Document Number Inconsistency" in s["signal"] for s in eval_res["signals"])
+
+def test_document_number_crosscheck_still_catches_real_mismatch():
+    """Tolerance is bounded to a single edit -- a genuinely different document
+    number must still be flagged."""
+    ocr_data = {"fields": {"document_number": "A9999999", "full_name": "JOHN DOE"}}
+    mrz_data = {
+        "surname": "DOE",
+        "document_number": "B8888888",
+        "nationality": "UTO",
+        "birth_date": "920510",
+        "expiry_date": "300101",
+        "checksums": []
+    }
+    eval_res = DocumentRulesEngine.evaluate(ocr_data, mrz_data)
+    assert any("Document Number Inconsistency" in s["signal"] for s in eval_res["signals"])
