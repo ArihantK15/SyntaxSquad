@@ -59,6 +59,17 @@ class SyntheticDocumentGenerator:
         same face" regardless of how their proportions are varied. A real (here,
         AI-generated, non-real-person) photo gives the model genuine structure
         to discriminate on.
+
+        The paste is alpha-feathered at the border rather than a hard
+        rectangular replace: a plain `img.paste(photo, (x, y))` leaves a sharp
+        tonal/texture discontinuity at the photo's edge -- structurally the
+        same signature as a real crop-and-replace forgery, which is exactly
+        what a tamper-detection CNN trained on real forgery examples (SIDTD)
+        is designed to catch. A "genuine" demo specimen's own compositing
+        method shouldn't itself look like the attack the model is built to
+        detect. The feather blends the photo into the surrounding page rather
+        than butting a hard-edged rectangle against it, like a photo actually
+        printed/laminated onto the document base material would.
         """
         photo = Image.open(photo_path).convert("RGB")
         pw, ph = photo.size
@@ -73,7 +84,13 @@ class SyntheticDocumentGenerator:
             top = (ph - new_h) // 2
             photo = photo.crop((0, top, pw, top + new_h))
         photo = photo.resize((w, h), Image.LANCZOS)
-        img.paste(photo, (x, y))
+
+        feather = max(2, min(w, h) // 20)
+        mask = Image.new("L", (w, h), 255)
+        mask_draw = ImageDraw.Draw(mask)
+        mask_draw.rectangle((0, 0, w - 1, h - 1), outline=0, width=feather)
+        mask = mask.filter(ImageFilter.GaussianBlur(feather))
+        img.paste(photo, (x, y), mask=mask)
 
     @classmethod
     def _draw_avatar(cls, draw: ImageDraw.ImageDraw, x: int, y: int, w: int, h: int, variant: int = 1):

@@ -16,7 +16,9 @@ Not run automatically -- this only builds the dataset in memory / on disk.
 Actual training happens in scripts/train_tamper_cnn.py, which imports
 `generate_dataset` from this module.
 """
+import json
 import os
+import re
 import sys
 import random
 import tempfile
@@ -252,6 +254,140 @@ def load_casia_patches(
         for idx in idxs:
             patches.append(_patch_centered_at(img, int(xs[idx]), int(ys[idx])))
             labels.append(1)
+
+    return np.stack(patches).astype(np.uint8), np.array(labels, dtype=np.int64)
+
+
+def load_sidtd_patches(
+    sidtd_root: str,
+    patches_per_real: int = 4,
+    patches_per_fake: int = 4,
+    elsewhere_per_fake: int = 2,
+    seed: int = 42,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Samples labeled 64x64 patches from the SIDTD dataset (Synthetic dataset
+    of ID and Travel Documents, CVC/Computer Vision Center, CC BY-SA 3.0):
+
+        http://datasets.cvc.uab.es/SIDTD/templates.zip
+
+    Unlike CASIA (real splices, but not documents) or our own synthetic
+    generator (documents, but only a narrow rectangular copy-paste
+    signature), SIDTD is real *document* forgeries: MIDV-2020's mock ID
+    templates digitally tampered (crop-and-replace or inpainting) at the
+    same resolution/coordinate space as their source image -- across 10
+    real-looking ID document types. (SIDTD separately offers physically
+    printed, laminated, and re-photographed video captures of these same
+    forgeries in clips.zip/videos.zip, tens of GB and not used here --
+    templates.zip's still images are what this loader reads.) This is
+    document-domain data the tamper CNN never had.
+
+    Expects `sidtd_root` to be the extracted `templates/` directory:
+        Images/reals/<doctype>_<NN>.jpg           genuine documents
+        Images/fakes/<doctype>_<NN>_fake_*.jpg     tampered documents
+        Annotations/reals/<doctype>.json           VIA-format field regions
+                                                    per genuine image
+        Annotations/fakes/<fake_stem>.json         which field was tampered
+                                                    and which real image it
+                                                    was derived from
+
+    Each fake's annotation names the tampered field (e.g. "expiry_date") and
+    its source real image (e.g. "alb_id_00.jpg"); the source's own
+    annotation gives that field's pixel bounding box -- letting tampered
+    patches be centered on the actual tampered region rather than sampled
+    from anywhere in the image (the same lesson CASIA's mask-based sampling
+    already taught: a bounding-box-blind sample mislabels clean background
+    as tampered). When a field can't be resolved (missing annotation, or a
+    two-source Crop_and_Replace whose primary field is "None"), fall back to
+    whole-image sampling for that one fake rather than dropping it --
+    still real tampered-document data, just without precise localization.
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+
+    root = Path(sidtd_root)
+    reals_dir, fakes_dir = root / "Images" / "reals", root / "Images" / "fakes"
+    reals_ann_dir, fakes_ann_dir = root / "Annotations" / "reals", root / "Annotations" / "fakes"
+
+    doctype_annotations: dict = {}
+
+    def _doctype_annotation(doctype: str) -> Optional[dict]:
+        if doctype not in doctype_annotations:
+            path = reals_ann_dir / f"{doctype}.json"
+            doctype_annotations[doctype] = json.loads(path.read_text()) if path.exists() else None
+        return doctype_annotations[doctype]
+
+    def _field_bbox(src_filename: str, field: str) -> Optional[Tuple[int, int, int, int]]:
+        m = re.match(r'^(.+)_(\d+)\.jpg$', src_filename)
+        if not m:
+            return None
+        doctype, index = m.group(1), m.group(2)
+        annotation = _doctype_annotation(doctype)
+        if annotation is None:
+            return None
+        img_meta = annotation.get("_via_img_metadata", {})
+        key = next((k for k in img_meta if k.startswith(f"{index}.jpg")), None)
+        if key is None:
+            return None
+        for region in img_meta[key].get("regions", []):
+            if region.get("region_attributes", {}).get("field_name") == field:
+                sa = region["shape_attributes"]
+                return (sa["x"], sa["y"], sa["width"], sa["height"])
+        return None
+
+    patches: List[np.ndarray] = []
+    labels: List[int] = []
+
+    for f in sorted(reals_dir.glob("*.jpg")):
+        img = cv2.imread(str(f))
+        if img is None:
+            continue
+        for _ in range(patches_per_real):
+            patches.append(_random_patch(img))
+            labels.append(0)
+
+    resolved, unresolved = 0, 0
+    for f in sorted(fakes_dir.glob("*.jpg")):
+        ann_path = fakes_ann_dir / f"{f.stem}.json"
+        if not ann_path.exists():
+            continue
+        meta = json.loads(ann_path.read_text())
+        img = cv2.imread(str(f))
+        if img is None:
+            continue
+
+        bbox = None
+        src, field = meta.get("src"), meta.get("field")
+        if src and src != "None" and field and field != "None":
+            bbox = _field_bbox(src, field)
+
+        if bbox is not None:
+            resolved += 1
+            x, y, w, h = bbox
+            for _ in range(patches_per_fake):
+                cx = x + random.randint(0, max(1, w - 1))
+                cy = y + random.randint(0, max(1, h - 1))
+                patches.append(_patch_centered_at(img, cx, cy))
+                labels.append(1)
+            ih, iw = img.shape[:2]
+            added = 0
+            for _ in range(elsewhere_per_fake * 5):  # bounded retry, not infinite
+                if added >= elsewhere_per_fake:
+                    break
+                rx, ry = random.randint(0, iw - 1), random.randint(0, ih - 1)
+                if x <= rx <= x + w and y <= ry <= y + h:
+                    continue
+                patches.append(_random_patch(img))
+                labels.append(0)
+                added += 1
+        else:
+            unresolved += 1
+            for _ in range(patches_per_fake):
+                patches.append(_random_patch(img))
+                labels.append(1)
+
+    print(f"  SIDTD: {resolved} fakes with a precisely-located tampered field, "
+          f"{unresolved} using whole-image weak labeling")
 
     return np.stack(patches).astype(np.uint8), np.array(labels, dtype=np.int64)
 

@@ -13,12 +13,37 @@ service safely ignores the CNN entirely and relies on its forensic heuristics
 the `cnn_ready` gate in TamperDetectionService.__init__.
 
 By default this trains on synthetic patches only (self-contained, no
-external download). If the CASIA v2.0 dataset (real photos, real human-made
-splices -- see generate_tamper_training_data.load_casia_patches for how to
-get it) is present at the path in CASIA2_DIR below, its patches are blended
-in too: real splice statistics generalize better than our synthetic
-generator's narrow rectangular-copy-paste signature. The dataset itself is
-never committed to this repo -- only the small trained checkpoint is.
+external download). Two optional real datasets can be blended in via env
+vars (see CASIA2_DIR / SIDTD_DIR below) -- neither is committed to this
+repo, only the small trained checkpoint is:
+
+  - CASIA v2.0: real photos, real human-made splices, but not documents.
+  - SIDTD (http://datasets.cvc.uab.es/SIDTD/templates.zip): real ID
+    document forgeries -- MIDV-2020 templates digitally tampered
+    (crop-and-replace or inpainting) at the same resolution as their
+    source, with the tampered field and its pixel bounding box given in
+    the accompanying annotations (see load_sidtd_patches). This is
+    document-domain data our own synthetic generator's narrow rectangular
+    copy-paste signature can't provide on its own.
+
+CAUTION -- SIDTD and this tiny 25k-parameter model: blending SIDTD in
+measurably improved validation accuracy (up to ~82%) but, in four separate
+training runs, produced a checkpoint that scored a confident (~1.0
+probability) FALSE POSITIVE on the portrait region of every fresh genuine
+demo specimen -- regardless of domain-sampling weights (tried 1/3-1/3-1/3
+and 50/25/25), and independent of whether a real photo or the default
+avatar was in the portrait box. SIDTD's own portrait-tampering examples are
+narrow (~7 "photo" field-tampering images among ~1200 fakes) and specific
+to MIDV-2020's face style; this model appears too small to absorb that
+signal without overfitting to spurious correlations that then misfire on
+our own generator's differently-styled portraits. The committed
+`tamper_cnn.pth` is therefore NOT trained with SIDTD blended in --
+CASIA-only, as before. The SIDTD loader and this 3-way domain-tracking
+infrastructure are kept because they work correctly and are valuable for a
+future attempt (a larger model, more own-domain data to counterbalance, or
+per-domain model selection) -- just don't trust a SIDTD-blended checkpoint
+without running the sanity check below AND manually inspecting per-region
+CNN output (portrait/center/mrz), not just the aggregate score.
 """
 import os
 import sys
@@ -34,7 +59,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
 
 from app.ml.tamper_model import LightweightForensicCNN
 from app.utils.synthetic_generator import SyntheticDocumentGenerator
-from generate_tamper_training_data import generate_dataset, load_casia_patches
+from generate_tamper_training_data import generate_dataset, load_casia_patches, load_sidtd_patches
 
 WEIGHTS_PATH = Path(__file__).resolve().parent.parent / "backend" / "app" / "ml" / "weights" / "tamper_cnn.pth"
 
@@ -63,6 +88,14 @@ else:
 # splice data into training. Unset/absent means synthetic data only.
 CASIA2_DIR = os.environ.get("CASIA2_DIR")
 
+# Set the SIDTD_DIR env var to a local extraction of SIDTD's templates.zip
+# (the directory containing Images/ and Annotations/) to blend in real
+# document forgeries: MIDV-2020 ID templates that were printed, physically
+# tampered, laminated, and re-photographed. Unlike CASIA (real splices, not
+# documents) this is real document-domain data -- see
+# generate_tamper_training_data.load_sidtd_patches for how to get it.
+SIDTD_DIR = os.environ.get("SIDTD_DIR")
+
 EPOCHS = 12
 BATCH_SIZE = 32
 LEARNING_RATE = 1e-3
@@ -76,10 +109,17 @@ def to_tensor_dataset(patches: np.ndarray, labels: np.ndarray) -> TensorDataset:
 
 
 def _domain_val_accuracy(model, val_ds, domain: np.ndarray, which: int) -> Optional[float]:
-    """Validation accuracy restricted to one domain (0=our documents, 1=CASIA).
-    Kept separate from the combined metric because CASIA's sheer volume (see
-    DOMAIN note below) can swamp it -- a model can look accurate overall while
-    silently failing on the domain it will actually run against in production."""
+    """Validation accuracy restricted to one domain (0=our own synthetic
+    generator, 1=CASIA, 2=SIDTD). Kept separate from the combined metric
+    because a larger domain's sheer volume can swamp it -- a model can look
+    accurate overall (or on a "document-domain" umbrella average) while
+    silently regressing on the specific domain that matters. Blending in
+    SIDTD's real document forgeries measurably raised the combined
+    document-domain figure, but SIDTD's real-photograph statistics (camera
+    noise, JPEG artifacts from phone capture) ended up outnumbering and
+    diluting our own generator's clean-render statistics 2:1 within that
+    combined figure -- silently regressing exactly the style our own demo
+    scenarios actually produce, invisible unless measured on its own."""
     idxs = [i for i in val_ds.indices if domain[i] == which]
     if not idxs:
         return None
@@ -100,8 +140,14 @@ def main():
     # per-domain validation metric introduced above.
     patches, labels = generate_dataset(n_docs=300, patches_per_doc=8)
     print(f"  {len(patches)} patches: {int((labels==0).sum())} authentic, {int((labels==1).sum())} tampered")
-    # DOMAIN 0 = our own travel-document generator (what TamperDetectionService
-    # actually sees in production); DOMAIN 1 = CASIA's natural photographs.
+    # DOMAIN 0 = our own synthetic generator -- what the demo scenarios
+    # actually produce and the only thing directly, visibly testable right
+    # now. DOMAIN 1 = CASIA's natural photographs (real splices, not
+    # documents). DOMAIN 2 = SIDTD's real, photographed document forgeries.
+    # Tracked separately rather than folding SIDTD into domain 0: SIDTD's
+    # sheer volume would otherwise dominate a combined "document domain"
+    # figure and hide a regression on our own generator's specific style
+    # (see _domain_val_accuracy docstring for how this was actually caught).
     domain = np.zeros(len(patches), dtype=np.int64)
 
     if CASIA2_DIR and Path(CASIA2_DIR).is_dir():
@@ -112,25 +158,47 @@ def main():
         patches = np.concatenate([patches, casia_patches], axis=0)
         labels = np.concatenate([labels, casia_labels], axis=0)
         domain = np.concatenate([domain, np.ones(len(casia_patches), dtype=np.int64)])
-        print(f"  combined total: {len(patches)} patches "
-              f"({int((domain==0).sum())} document-domain, {int((domain==1).sum())} CASIA-domain)")
+
+    if SIDTD_DIR and Path(SIDTD_DIR).is_dir():
+        print(f"\nBlending in real document forgeries from {SIDTD_DIR} ...")
+        sidtd_patches, sidtd_labels = load_sidtd_patches(SIDTD_DIR)
+        print(f"  {len(sidtd_patches)} SIDTD patches: "
+              f"{int((sidtd_labels==0).sum())} authentic, {int((sidtd_labels==1).sum())} tampered")
+        patches = np.concatenate([patches, sidtd_patches], axis=0)
+        labels = np.concatenate([labels, sidtd_labels], axis=0)
+        domain = np.concatenate([domain, np.full(len(sidtd_patches), 2, dtype=np.int64)])
+
+    print(f"\nCombined total: {len(patches)} patches "
+          f"({int((domain==0).sum())} own-synthetic, {int((domain==1).sum())} CASIA, "
+          f"{int((domain==2).sum())} SIDTD)")
 
     dataset = to_tensor_dataset(patches, labels)
     n_val = int(len(dataset) * VAL_FRACTION)
     n_train = len(dataset) - n_val
     train_ds, val_ds = random_split(dataset, [n_train, n_val], generator=torch.Generator().manual_seed(42))
 
-    # CASIA's natural photos outnumber our document patches ~15:1 in this
-    # blend. A plain shuffled loader would let CASIA statistics dominate
-    # every batch, so the model mostly learns "natural photo" splice cues and
-    # barely learns what an authentic *document* patch looks like -- exactly
-    # what caused a genuine specimen to be confidently misflagged as tampered
-    # (see the tamper_cnn.pth retrain that fixed this bug). Reweight so both
-    # domains are drawn from with roughly equal probability per epoch,
-    # without discarding any CASIA data.
+    # Each domain has wildly different volume (CASIA and SIDTD both dwarf our
+    # own generator's patch count). A plain shuffled loader would let the
+    # largest domain dominate every batch -- exactly what caused a genuine
+    # specimen to be confidently misflagged as tampered the first time
+    # (CASIA drowning out our own documents entirely). Giving all three
+    # domains EQUAL per-epoch probability fixed that but overcorrected:
+    # CASIA and SIDTD are both real *photographs* (camera noise, JPEG
+    # artifacts) while our own generator produces clean, noise-free digital
+    # renders -- two photographic domains at 2/3 combined share pulled the
+    # tiny 25k-param model's learned features toward photographic statistics
+    # that don't transfer to our own render style, producing a maximally
+    # confident (~1.0) false positive on every genuine demo specimen despite
+    # a deceptively decent held-out validation number (see epoch log this
+    # replaced). Our own domain keeps majority share (50%) -- it's what the
+    # visible demo scenarios actually run against and the only one directly,
+    # visibly testable right now -- while CASIA and SIDTD still each get
+    # meaningful, non-trivial exposure (25% apiece) rather than being
+    # dropped, so their splice statistics still contribute.
     train_domain = domain[train_ds.indices]
-    domain_counts = np.bincount(train_domain, minlength=2)
-    per_sample_weight = 1.0 / domain_counts[train_domain]
+    domain_counts = np.bincount(train_domain, minlength=3)
+    domain_share = np.array([0.50, 0.25, 0.25])  # own-synthetic, CASIA, SIDTD
+    per_sample_weight = domain_share[train_domain] / domain_counts[train_domain]
     sampler = WeightedRandomSampler(per_sample_weight, num_samples=n_train, replacement=True)
 
     train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, sampler=sampler)
@@ -162,28 +230,73 @@ def main():
                 preds = model(xb).argmax(dim=1)
                 correct += (preds == yb).sum().item()
         val_acc = correct / max(1, n_val)
-        doc_acc = _domain_val_accuracy(model, val_ds, domain, which=0)
-        doc_acc_str = f"{doc_acc:.3%}" if doc_acc is not None else "n/a"
+        own_acc = _domain_val_accuracy(model, val_ds, domain, which=0)
+        casia_acc = _domain_val_accuracy(model, val_ds, domain, which=1)
+        sidtd_acc = _domain_val_accuracy(model, val_ds, domain, which=2)
+        fmt = lambda a: f"{a:.3%}" if a is not None else "n/a"
 
         marker = ""
-        # Model selection is driven by document-domain accuracy (falling back
-        # to the combined metric if there's no document-domain validation
-        # data) -- this is the metric that reflects real deployment
-        # performance, not overall accuracy dominated by CASIA volume.
-        selection_metric = doc_acc if doc_acc is not None else val_acc
+        # Model selection is driven by accuracy on OUR OWN generator's domain
+        # specifically (falling back to the combined metric if that domain
+        # has no validation data): it's the only domain that's directly,
+        # visibly testable right now (the built-in demo scenarios), and
+        # SIDTD/CASIA already showed that a broader "document domain" or
+        # combined figure can look better while this specific one regresses.
+        selection_metric = own_acc if own_acc is not None else val_acc
         if selection_metric > best_val_acc:
             best_val_acc = selection_metric
             best_state = {k: v.clone() for k, v in model.state_dict().items()}
             marker = "  (best so far)"
-        print(f"  epoch {epoch:2d}/{EPOCHS}  train_loss={train_loss:.4f}  "
-              f"val_acc={val_acc:.3%}  doc_domain_val_acc={doc_acc_str}{marker}")
+        print(f"  epoch {epoch:2d}/{EPOCHS}  train_loss={train_loss:.4f}  val_acc={val_acc:.3%}  "
+              f"own_synthetic_acc={fmt(own_acc)}  casia_acc={fmt(casia_acc)}  sidtd_acc={fmt(sidtd_acc)}{marker}")
 
     WEIGHTS_PATH.parent.mkdir(parents=True, exist_ok=True)
     torch.save(best_state, WEIGHTS_PATH)
-    print(f"\nBest document-domain validation accuracy: {best_val_acc:.3%}")
+    print(f"\nBest own-synthetic-domain validation accuracy: {best_val_acc:.3%}")
     print(f"Saved best-epoch checkpoint to {WEIGHTS_PATH}")
     print("Restart the backend (or the docker container) to pick it up --")
     print("TamperDetectionService loads it automatically on startup.")
+
+    _sanity_check_against_fresh_specimens()
+
+
+def _sanity_check_against_fresh_specimens():
+    """
+    The held-out validation split is drawn from the SAME pool of patches used
+    for training, just excluded from gradient updates -- it can look good
+    (a real run scored 79.7% own-synthetic accuracy) while the saved
+    checkpoint is still a confident (~1.0 probability) false positive on
+    entirely fresh genuine documents, because the model memorized training
+    patches rather than generalizing. This runs the checkpoint through the
+    actual production code path (TamperDetectionService.analyze, same
+    portrait/center/mrz regions, same font) against freshly generated
+    documents that were never in the training set at all, as a direct,
+    honest check before anyone trusts this checkpoint.
+    """
+    import tempfile
+    from app.services.tamper_service import TamperDetectionService
+
+    print("\nSanity-checking the saved checkpoint against 5 FRESH genuine specimens "
+          "(never seen during training)...")
+    service = TamperDetectionService()
+    risks = []
+    for i in range(5):
+        out_path = tempfile.mktemp(suffix=".jpg")
+        SyntheticDocumentGenerator.generate_document(
+            out_path=out_path, mode="genuine", doc_number=f"S{9000000 + i}"
+        )
+        result = service.analyze(out_path, case_id=f"sanity-{i}")
+        risks.append(result["tamper_risk"])
+        os.remove(out_path)
+    mean_risk = sum(risks) / len(risks)
+    print(f"  tamper_risk on fresh genuine specimens: {risks} (mean {mean_risk:.2f})")
+    if mean_risk >= 0.60:
+        print(f"  WARNING: mean risk {mean_risk:.2f} is uncomfortably close to or above "
+              f"the 0.70 HIGH threshold despite a good validation accuracy figure. "
+              f"Do NOT deploy this checkpoint without investigating further -- "
+              f"the validation split is not a reliable enough proxy on its own.")
+    else:
+        print(f"  OK: comfortably below the 0.70 HIGH threshold.")
 
 
 if __name__ == "__main__":
