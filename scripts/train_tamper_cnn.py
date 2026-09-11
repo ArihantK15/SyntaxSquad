@@ -33,9 +33,30 @@ from torch.utils.data import TensorDataset, DataLoader, random_split, WeightedRa
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
 
 from app.ml.tamper_model import LightweightForensicCNN
+from app.utils.synthetic_generator import SyntheticDocumentGenerator
 from generate_tamper_training_data import generate_dataset, load_casia_patches
 
 WEIGHTS_PATH = Path(__file__).resolve().parent.parent / "backend" / "app" / "ml" / "weights" / "tamper_cnn.pth"
+
+# The synthetic document generator falls back through a list of fonts
+# (see SyntheticDocumentGenerator._load_font) -- macOS has Helvetica, but the
+# production container (backend/Dockerfile) only installs `fonts-dejavu-core`.
+# Training on whichever machine happens to run this script means the model
+# can learn on Helvetica-rendered text glyphs while production only ever
+# shows it DejaVu-rendered ones -- a real train/inference mismatch discovered
+# after a genuine document scored differently on macOS vs. in Docker despite
+# identical logical content. Force the container's actual font here so the
+# checkpoint is calibrated against what it will actually see in production,
+# regardless of what machine trains it. TAMPER_TRAIN_FONT can override this
+# (e.g. to point at a local copy of DejaVuSans.ttf extracted from the image).
+_PRODUCTION_FONT = os.environ.get("TAMPER_TRAIN_FONT", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
+if os.path.exists(_PRODUCTION_FONT):
+    SyntheticDocumentGenerator._FONT_CANDIDATES = [_PRODUCTION_FONT]
+    print(f"Training with production font: {_PRODUCTION_FONT}")
+else:
+    print(f"WARNING: production font not found at {_PRODUCTION_FONT} -- "
+          f"falling back to this machine's default font candidates, which "
+          f"will NOT match the Docker deployment's rendering.")
 
 # Set the CASIA2_DIR env var to a local CASIA v2.0 extraction path (the
 # directory containing Au/, Tp/, and "CASIA 2 Groundtruth/") to blend real
