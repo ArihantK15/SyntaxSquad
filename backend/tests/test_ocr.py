@@ -1,7 +1,68 @@
+import cv2
+import numpy as np
 import pytest
+from PIL import Image
+
+from app.services.mrz_service import MRZService
 from app.services.ocr_service import TesseractOCRService
+from app.utils.synthetic_generator import SyntheticDocumentGenerator
 
 svc = TesseractOCRService.__new__(TesseractOCRService)  # skip __init__'s tesseract binary check
+
+
+def _document_like_image(angle: float) -> np.ndarray:
+    """A white page with a dark rectangle standing in for a line of print, rotated by `angle`."""
+    img = np.full((300, 300), 255, dtype=np.uint8)
+    cv2.rectangle(img, (50, 130), (250, 170), 0, -1)
+    matrix = cv2.getRotationMatrix2D((150, 150), angle, 1.0)
+    return cv2.warpAffine(img, matrix, (300, 300), borderValue=255)
+
+
+@pytest.mark.parametrize("true_angle", [3, -3, 7, -7, 15, -15])
+def test_estimate_skew_angle_matches_a_known_rotation(true_angle):
+    """
+    cv2.minAreaRect's angle convention has changed across OpenCV versions and
+    flips depending on the bounding box's own aspect ratio (see
+    _estimate_skew_angle's docstring) -- verify the correction formula
+    against known rotations rather than trust it by inspection.
+    """
+    gray = _document_like_image(true_angle)
+    detected = TesseractOCRService._estimate_skew_angle(gray)
+    assert detected == pytest.approx(-true_angle, abs=0.1)
+
+
+def test_estimate_skew_angle_is_zero_on_sparse_content():
+    """Too little foreground to estimate confidently should not invent an angle."""
+    blank = np.full((300, 300), 255, dtype=np.uint8)
+    assert TesseractOCRService._estimate_skew_angle(blank) == 0.0
+
+
+def test_deskew_recovers_a_valid_mrz_from_a_rotated_document(tmp_path):
+    """
+    Reproduces a real capture condition: a photographed (not flatbed-
+    scanned) document is rarely perfectly axis-aligned. extract_mrz_lines
+    crops a FIXED bottom fraction of the image to isolate the MRZ band, and
+    a several-degree rotation is enough to make Tesseract misread individual
+    MRZ characters (garbling the crop, sometimes splitting it into the wrong
+    number of lines) even though the crop itself still technically contains
+    the MRZ. Deskewing the full image before that crop -- added specifically
+    for this -- recovers a checksum-valid MRZ from a rotated capture that
+    the undeskewed pipeline garbles into an invalid (or unparsable) result.
+    """
+    doc_path = str(tmp_path / "genuine.jpg")
+    SyntheticDocumentGenerator.generate_document(doc_path, mode="genuine")
+
+    rotated_path = str(tmp_path / "rotated.jpg")
+    with Image.open(doc_path) as img:
+        rotated = img.convert("RGB").rotate(
+            4, resample=Image.BICUBIC, expand=False, fillcolor=(255, 255, 255)
+        )
+        rotated.save(rotated_path, "JPEG", quality=95)
+
+    mrz_lines = svc.extract_mrz_lines(rotated_path)
+    result = MRZService.parse_pre_isolated_lines(mrz_lines) if len(mrz_lines) >= 2 else None
+    assert result is not None
+    assert result["is_valid"] is True
 
 
 def test_full_name_survives_garbled_label():

@@ -153,6 +153,243 @@ def test_country_survives_ocr_letter_digit_confusion():
     assert result["country"] == "UTO"
 
 
+def test_mrz_td1_parsing():
+    """Tests parsing a standard TD1 national-ID-card MRZ triplet."""
+    doc_raw = "I12345678"
+    doc_cd = MRZService.compute_check_digit(doc_raw)
+    optional1_raw = "<" * 15
+    line1 = f"I<UTO{doc_raw}{doc_cd}{optional1_raw}"
+    assert len(line1) == 30
+
+    dob_raw = "000101"
+    dob_cd = MRZService.compute_check_digit(dob_raw)
+    exp_raw = "300101"
+    exp_cd = MRZService.compute_check_digit(exp_raw)
+    optional2_raw = "<" * 11
+    comp_raw = doc_raw + doc_cd + optional1_raw + dob_raw + dob_cd + exp_raw + exp_cd + optional2_raw
+    comp_cd = MRZService.compute_check_digit(comp_raw)
+    line2 = f"{dob_raw}{dob_cd}M{exp_raw}{exp_cd}UTO{optional2_raw}{comp_cd}"
+    assert len(line2) == 30
+
+    line3 = "KAUL<<ARIHANT".ljust(30, '<')
+
+    result = MRZService.parse_td1(line1, line2, line3)
+    assert result["format"] == "TD1"
+    assert result["country"] == "UTO"
+    assert result["nationality"] == "UTO"
+    assert result["document_number"] == "I12345678"
+    assert result["surname"] == "KAUL"
+    assert result["given_names"] == "ARIHANT"
+    assert result["sex"] == "M"
+    assert result["is_valid"] is True
+    assert all(cs["valid"] for cs in result["checksums"])
+
+
+def test_mrz_td1_checksum_tampering_detected():
+    """Corrupting the TD1 document-number check digit must fail validation."""
+    doc_raw = "I12345678"
+    doc_cd = MRZService.compute_check_digit(doc_raw)
+    corrupted_cd = "9" if doc_cd != "9" else "8"
+    optional1_raw = "<" * 15
+    line1 = f"I<UTO{doc_raw}{corrupted_cd}{optional1_raw}"
+
+    dob_raw = "000101"
+    dob_cd = MRZService.compute_check_digit(dob_raw)
+    exp_raw = "300101"
+    exp_cd = MRZService.compute_check_digit(exp_raw)
+    optional2_raw = "<" * 11
+    comp_raw = doc_raw + doc_cd + optional1_raw + dob_raw + dob_cd + exp_raw + exp_cd + optional2_raw
+    comp_cd = MRZService.compute_check_digit(comp_raw)
+    line2 = f"{dob_raw}{dob_cd}M{exp_raw}{exp_cd}UTO{optional2_raw}{comp_cd}"
+    line3 = "KAUL<<ARIHANT".ljust(30, '<')
+
+    result = MRZService.parse_td1(line1, line2, line3)
+    assert result["is_valid"] is False
+    doc_cs = [cs for cs in result["checksums"] if "Document Number" in cs["field"]][0]
+    assert doc_cs["valid"] is False
+
+
+def test_mrz_td2_parsing():
+    """Tests parsing a standard TD2 (visa / ID card) MRZ pair."""
+    line1 = "I<UTOKAUL<<ARIHANT".ljust(36, '<')
+    assert len(line1) == 36
+
+    doc_raw = "X1234567<"
+    doc_cd = MRZService.compute_check_digit(doc_raw)
+    dob_raw = "000101"
+    dob_cd = MRZService.compute_check_digit(dob_raw)
+    exp_raw = "300101"
+    exp_cd = MRZService.compute_check_digit(exp_raw)
+    optional_raw = "<" * 7
+    comp_raw = doc_raw + doc_cd + dob_raw + dob_cd + exp_raw + exp_cd + optional_raw
+    comp_cd = MRZService.compute_check_digit(comp_raw)
+    line2 = f"{doc_raw}{doc_cd}UTO{dob_raw}{dob_cd}M{exp_raw}{exp_cd}{optional_raw}{comp_cd}"
+    assert len(line2) == 36
+
+    result = MRZService.parse_td2(line1, line2)
+    assert result["format"] == "TD2"
+    assert result["country"] == "UTO"
+    assert result["surname"] == "KAUL"
+    assert result["given_names"] == "ARIHANT"
+    assert result["document_number"] == "X1234567"
+    assert result["nationality"] == "UTO"
+    assert result["is_valid"] is True
+    assert all(cs["valid"] for cs in result["checksums"])
+
+
+def test_mrz_td2_checksum_tampering_detected():
+    """Corrupting the TD2 composite check digit must fail validation."""
+    line1 = "I<UTOKAUL<<ARIHANT".ljust(36, '<')
+    doc_raw = "X1234567<"
+    doc_cd = MRZService.compute_check_digit(doc_raw)
+    dob_raw = "000101"
+    dob_cd = MRZService.compute_check_digit(dob_raw)
+    exp_raw = "300101"
+    exp_cd = MRZService.compute_check_digit(exp_raw)
+    optional_raw = "<" * 7
+    comp_raw = doc_raw + doc_cd + dob_raw + dob_cd + exp_raw + exp_cd + optional_raw
+    comp_cd = MRZService.compute_check_digit(comp_raw)
+    corrupted_comp_cd = "9" if comp_cd != "9" else "8"
+    line2 = f"{doc_raw}{doc_cd}UTO{dob_raw}{dob_cd}M{exp_raw}{exp_cd}{optional_raw}{corrupted_comp_cd}"
+
+    result = MRZService.parse_td2(line1, line2)
+    assert result["is_valid"] is False
+
+
+def test_parse_pre_isolated_lines_dispatches_td1_from_three_lines():
+    """Three isolated MRZ lines must be parsed as TD1, not forced into TD3."""
+    doc_raw = "I12345678"
+    doc_cd = MRZService.compute_check_digit(doc_raw)
+    optional1_raw = "<" * 15
+    line1 = f"I<UTO{doc_raw}{doc_cd}{optional1_raw}"
+
+    dob_raw = "000101"
+    dob_cd = MRZService.compute_check_digit(dob_raw)
+    exp_raw = "300101"
+    exp_cd = MRZService.compute_check_digit(exp_raw)
+    optional2_raw = "<" * 11
+    comp_raw = doc_raw + doc_cd + optional1_raw + dob_raw + dob_cd + exp_raw + exp_cd + optional2_raw
+    comp_cd = MRZService.compute_check_digit(comp_raw)
+    line2 = f"{dob_raw}{dob_cd}M{exp_raw}{exp_cd}UTO{optional2_raw}{comp_cd}"
+    line3 = "KAUL<<ARIHANT".ljust(30, '<')
+
+    result = MRZService.parse_pre_isolated_lines([line1, line2, line3])
+    assert result is not None
+    assert result["format"] == "TD1"
+    assert result["is_valid"] is True
+
+
+def test_parse_pre_isolated_lines_defaults_ambiguous_two_line_input_to_td3():
+    """
+    TD2 and TD3 share an identical line2 prefix layout and differ only in
+    the optional-data field's length, immediately before the final
+    composite check digit -- so whenever that field ends in '<' filler (the
+    common case, exercised here with an all-filler optional field), a
+    genuine TD2 line ALSO parses as a checksum-valid TD3, since appending
+    extra zero-value filler at the tail of a checksum payload can't change
+    its sum. A checksum-based tiebreak between the two is therefore not a
+    real tiebreak. TD3 (passports) is this system's dominant real-world
+    case, so the dispatcher deliberately defaults ambiguous 2-line input to
+    it rather than guess; parse_td2 remains directly callable and correct
+    for a caller that already knows its input is TD2.
+    """
+    line1 = "I<UTOKAUL<<ARIHANT".ljust(36, '<')
+    doc_raw = "X1234567<"
+    doc_cd = MRZService.compute_check_digit(doc_raw)
+    dob_raw = "000101"
+    dob_cd = MRZService.compute_check_digit(dob_raw)
+    exp_raw = "300101"
+    exp_cd = MRZService.compute_check_digit(exp_raw)
+    optional_raw = "<" * 7
+    comp_raw = doc_raw + doc_cd + dob_raw + dob_cd + exp_raw + exp_cd + optional_raw
+    comp_cd = MRZService.compute_check_digit(comp_raw)
+    line2 = f"{doc_raw}{doc_cd}UTO{dob_raw}{dob_cd}M{exp_raw}{exp_cd}{optional_raw}{comp_cd}"
+
+    result = MRZService.parse_pre_isolated_lines([line1, line2])
+    assert result is not None
+    assert result["format"] == "TD3"
+    assert result["is_valid"] is True
+    # The fields that matter downstream are still correct regardless of the
+    # format label, since TD2 and TD3 share this prefix layout exactly.
+    assert result["document_number"] == "X1234567"
+    assert result["nationality"] == "UTO"
+
+
+def test_extract_mrz_from_lines_still_finds_td3_pair_among_prose():
+    """Regression guard: whole-document scanning must still recognize TD3."""
+    line1 = "P<UTOKAUL<<ARIHANT<<<<<<<<<<<<<<<<<<<<<<"
+    doc_raw, dob_raw, exp_raw = "X1234567<", "000101", "300101"
+    doc_cd = MRZService.compute_check_digit(doc_raw)
+    dob_cd = MRZService.compute_check_digit(dob_raw)
+    exp_cd = MRZService.compute_check_digit(exp_raw)
+    opt_raw = "<" * 15
+    comp_cd = MRZService.compute_check_digit(doc_raw + doc_cd + dob_raw + dob_cd + exp_raw + exp_cd + opt_raw)
+    line2 = f"{doc_raw}{doc_cd}UTO{dob_raw}{dob_cd}M{exp_raw}{exp_cd}{opt_raw}{comp_cd}"
+
+    text_lines = ["DEMO TRAVEL DOCUMENT", "SURNAME: KAUL", line1, line2]
+    result = MRZService.extract_mrz_from_lines(text_lines)
+    assert result is not None
+    assert result["format"] == "TD3"
+    assert result["is_valid"] is True
+
+
+def test_extract_mrz_from_lines_finds_td1_triplet_among_prose():
+    """Whole-document scanning must recognize a TD1 triplet, not just TD3 pairs."""
+    doc_raw = "I12345678"
+    doc_cd = MRZService.compute_check_digit(doc_raw)
+    optional1_raw = "<" * 15
+    line1 = f"I<UTO{doc_raw}{doc_cd}{optional1_raw}"
+
+    dob_raw = "000101"
+    dob_cd = MRZService.compute_check_digit(dob_raw)
+    exp_raw = "300101"
+    exp_cd = MRZService.compute_check_digit(exp_raw)
+    optional2_raw = "<" * 11
+    comp_raw = doc_raw + doc_cd + optional1_raw + dob_raw + dob_cd + exp_raw + exp_cd + optional2_raw
+    comp_cd = MRZService.compute_check_digit(comp_raw)
+    line2 = f"{dob_raw}{dob_cd}M{exp_raw}{exp_cd}UTO{optional2_raw}{comp_cd}"
+    line3 = "KAUL<<ARIHANT".ljust(30, '<')
+
+    text_lines = ["NATIONAL IDENTITY CARD", "REPUBLIC OF UTOPIA", line1, line2, line3]
+    result = MRZService.extract_mrz_from_lines(text_lines)
+    assert result is not None
+    assert result["format"] == "TD1"
+    assert result["is_valid"] is True
+
+
+def test_td3_with_heavily_undercounted_filler_is_not_misrouted_to_td2():
+    """
+    Reproduces a real failure: a genuine TD3 document whose trailing '<'
+    filler run OCR'd short enough that neither line reached 40 characters
+    (line2 read at 39) got misrouted into parse_td2 by a naive
+    "length >= 40 -> TD3, else TD2" dispatch -- TD2's field offsets are
+    completely different from TD3's, so every checksum on this entirely
+    genuine document came out wrong. Since TD2 cannot exceed 36 real
+    characters, a 39-character line is unambiguous proof of TD3 regardless
+    of how short the OTHER line (here, a heavily undercounted line1) reads.
+    """
+    doc_raw, dob_raw, exp_raw = "P8B92144<", "850704", "300420"
+    doc_cd = MRZService.compute_check_digit(doc_raw)
+    dob_cd = MRZService.compute_check_digit(dob_raw)
+    exp_cd = MRZService.compute_check_digit(exp_raw)
+    opt_raw = "<" * 15
+    comp_cd = MRZService.compute_check_digit(doc_raw + doc_cd + dob_raw + dob_cd + exp_raw + exp_cd + opt_raw)
+
+    line1 = "P<ATLKOROL<<VICTOR<<<<<<<<"  # 26 chars: filler run undercounted
+    full_line2 = f"{doc_raw}{doc_cd}ATL{dob_raw}{dob_cd}M{exp_raw}{exp_cd}{opt_raw}{comp_cd}"
+    assert len(full_line2) == 44
+    # Simulate OCR undercounting the filler run (15 '<' read as 10), while
+    # still correctly reading the real composite check digit right after it.
+    line2 = full_line2[:-(len(opt_raw) + 1)] + ("<" * 10) + comp_cd
+    assert len(line2) == 39
+
+    result = MRZService.parse_pre_isolated_lines([line1, line2])
+    assert result is not None
+    assert result["format"] == "TD3"
+    assert result["document_number"] == "P8B92144"
+    assert result["is_valid"] is True
+
+
 def test_parse_pre_isolated_lines_handles_short_ocr_output():
     """A dedicated MRZ-band OCR pass may return lines shorter than 44 chars if
     the trailing filler run was undercounted; parse_pre_isolated_lines must

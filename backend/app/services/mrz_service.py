@@ -202,21 +202,283 @@ class MRZService:
         }
 
     @classmethod
+    def parse_td1(cls, line1: str, line2: str, line3: str) -> Dict[str, Any]:
+        """
+        Parses TD1 format (national ID cards, 3 lines of 30 characters).
+        Line 1: [Doc type 2][Country 3][Doc# 9][Doc# CD 1][Optional 15]
+        Line 2: [DOB 6][DOB CD 1][Sex 1][Expiry 6][Expiry CD 1][Nationality 3][Optional 11][Composite CD 1]
+        Line 3: [Surname]<<[Given Names]...
+        """
+        line1 = cls._reconstruct_length(cls.clean_mrz_line(line1), 30)
+        line2 = cls._reconstruct_length(cls.clean_mrz_line(line2), 30)
+        line3 = cls._reconstruct_length(cls.clean_mrz_line(line3), 30)
+
+        doc_type = line1[0:2].replace('<', '')
+        country = cls.normalize_letters(line1[2:5].replace('<', ''))
+
+        doc_number_raw = line1[5:14]
+        doc_number = doc_number_raw.replace('<', '')
+        doc_number_cd = cls.normalize_digits(line1[14])
+        optional1_raw = line1[15:30]
+
+        dob_raw = cls.normalize_digits(line2[0:6])
+        dob_cd = cls.normalize_digits(line2[6])
+
+        sex = line2[7].replace('<', 'X')
+        if sex not in ['M', 'F', 'X']:
+            sex = 'M'
+
+        expiry_raw = cls.normalize_digits(line2[8:14])
+        expiry_cd = cls.normalize_digits(line2[14])
+
+        nationality = cls.normalize_letters(line2[15:18].replace('<', ''))
+        optional2_raw = line2[18:29]
+        composite_cd = cls.normalize_digits(line2[29])
+
+        name_parts = line3.split('<<')
+        surname = name_parts[0].replace('<', ' ').strip()
+        given_names = ""
+        if len(name_parts) > 1:
+            given_names = name_parts[1].replace('<', ' ').strip()
+
+        calc_doc_cd = cls.compute_check_digit(doc_number_raw)
+        calc_dob_cd = cls.compute_check_digit(dob_raw)
+        calc_expiry_cd = cls.compute_check_digit(expiry_raw)
+
+        # Composite payload per ICAO 9303-5: line1's doc-number-through-
+        # optional-data-1 span, plus line2's DOB+CD, expiry+CD, and
+        # optional-data-2 spans -- built from the same already-normalized
+        # field values as the individual checksums above, for the same
+        # reason as TD3's composite (see parse_td3): computing it from raw,
+        # un-normalized slices would re-fail on ordinary OCR digit/letter
+        # noise the individual field checks already tolerate.
+        composite_data = (
+            doc_number_raw + doc_number_cd + optional1_raw
+            + dob_raw + dob_cd + expiry_raw + expiry_cd + optional2_raw
+        )
+        calc_composite_cd = cls.compute_check_digit(composite_data)
+
+        checksums = [
+            {
+                "field": "Document Number Checksum",
+                "value": doc_number_raw,
+                "check_digit": doc_number_cd,
+                "calculated_check_digit": calc_doc_cd,
+                "valid": doc_number_cd == calc_doc_cd
+            },
+            {
+                "field": "Date of Birth Checksum",
+                "value": dob_raw,
+                "check_digit": dob_cd,
+                "calculated_check_digit": calc_dob_cd,
+                "valid": dob_cd == calc_dob_cd
+            },
+            {
+                "field": "Expiry Date Checksum",
+                "value": expiry_raw,
+                "check_digit": expiry_cd,
+                "calculated_check_digit": calc_expiry_cd,
+                "valid": expiry_cd == calc_expiry_cd
+            },
+            {
+                "field": "Composite Checksum",
+                "value": "Composite Checksum Payload",
+                "check_digit": composite_cd,
+                "calculated_check_digit": calc_composite_cd,
+                "valid": composite_cd == calc_composite_cd
+            }
+        ]
+        all_valid = all(cs["valid"] for cs in checksums)
+
+        return {
+            "format": "TD1",
+            "line1": line1,
+            "line2": line2,
+            "line3": line3,
+            "document_type": doc_type or "I",
+            "country": country,
+            "surname": surname,
+            "given_names": given_names,
+            "document_number": doc_number,
+            "nationality": nationality,
+            "birth_date": dob_raw,
+            "sex": sex,
+            "expiry_date": expiry_raw,
+            "optional_data": (optional1_raw + optional2_raw).replace('<', ''),
+            "checksums": checksums,
+            "is_valid": all_valid
+        }
+
+    @classmethod
+    def parse_td2(cls, line1: str, line2: str) -> Dict[str, Any]:
+        """
+        Parses TD2 format (visas and some ID cards, 2 lines of 36 characters).
+        Line 1: [Doc type 2][Country 3][Surname]<<[Given Names]...
+        Line 2: [Doc# 9][Doc# CD 1][Nationality 3][DOB 6][DOB CD 1][Sex 1][Expiry 6][Expiry CD 1][Optional 7][Composite CD 1]
+        """
+        line1 = cls._reconstruct_length(cls.clean_mrz_line(line1), 36)
+        line2 = cls._reconstruct_length(cls.clean_mrz_line(line2), 36)
+
+        doc_type = line1[0:2].replace('<', '')
+        country = cls.normalize_letters(line1[2:5].replace('<', ''))
+
+        name_parts = line1[5:].split('<<')
+        surname = name_parts[0].replace('<', ' ').strip()
+        given_names = ""
+        if len(name_parts) > 1:
+            given_names = name_parts[1].replace('<', ' ').strip()
+
+        doc_number_raw = line2[0:9]
+        doc_number = doc_number_raw.replace('<', '')
+        doc_number_cd = cls.normalize_digits(line2[9])
+
+        nationality = cls.normalize_letters(line2[10:13].replace('<', ''))
+
+        dob_raw = cls.normalize_digits(line2[13:19])
+        dob_cd = cls.normalize_digits(line2[19])
+
+        sex = line2[20].replace('<', 'X')
+        if sex not in ['M', 'F', 'X']:
+            sex = 'M'
+
+        expiry_raw = cls.normalize_digits(line2[21:27])
+        expiry_cd = cls.normalize_digits(line2[27])
+
+        optional_raw = line2[28:35]
+        optional_data = optional_raw.replace('<', '')
+
+        composite_cd = cls.normalize_digits(line2[35])
+
+        calc_doc_cd = cls.compute_check_digit(doc_number_raw)
+        calc_dob_cd = cls.compute_check_digit(dob_raw)
+        calc_expiry_cd = cls.compute_check_digit(expiry_raw)
+
+        composite_data = doc_number_raw + doc_number_cd + dob_raw + dob_cd + expiry_raw + expiry_cd + optional_raw
+        calc_composite_cd = cls.compute_check_digit(composite_data)
+
+        checksums = [
+            {
+                "field": "Document Number Checksum",
+                "value": doc_number_raw,
+                "check_digit": doc_number_cd,
+                "calculated_check_digit": calc_doc_cd,
+                "valid": doc_number_cd == calc_doc_cd
+            },
+            {
+                "field": "Date of Birth Checksum",
+                "value": dob_raw,
+                "check_digit": dob_cd,
+                "calculated_check_digit": calc_dob_cd,
+                "valid": dob_cd == calc_dob_cd
+            },
+            {
+                "field": "Expiry Date Checksum",
+                "value": expiry_raw,
+                "check_digit": expiry_cd,
+                "calculated_check_digit": calc_expiry_cd,
+                "valid": expiry_cd == calc_expiry_cd
+            },
+            {
+                "field": "Composite Checksum",
+                "value": "Composite Checksum Payload",
+                "check_digit": composite_cd,
+                "calculated_check_digit": calc_composite_cd,
+                "valid": composite_cd == calc_composite_cd
+            }
+        ]
+        all_valid = all(cs["valid"] for cs in checksums)
+
+        return {
+            "format": "TD2",
+            "line1": line1,
+            "line2": line2,
+            "document_type": doc_type or "I",
+            "country": country,
+            "surname": surname,
+            "given_names": given_names,
+            "document_number": doc_number,
+            "nationality": nationality,
+            "birth_date": dob_raw,
+            "sex": sex,
+            "expiry_date": expiry_raw,
+            "optional_data": optional_data,
+            "checksums": checksums,
+            "is_valid": all_valid
+        }
+
+    @classmethod
+    def _dispatch_by_line_shape(cls, lines: List[str]) -> Optional[Dict[str, Any]]:
+        """
+        Chooses between TD1 and TD3 by how many MRZ-shaped lines were
+        found. Line COUNT reliably tells TD1 (always 3 lines) apart from
+        the 2-line formats -- but TD2 and TD3 are NOT auto-detected apart
+        from each other here, for a structural reason discovered while
+        building this:
+
+        TD2 and TD3 share an IDENTICAL line2 prefix layout (document
+        number, nationality, DOB, sex, expiry all sit at the same
+        offsets) and differ only in the optional-data field's length (7
+        vs 15 chars) immediately before the final composite check digit.
+        Whenever that optional field ends in '<' filler -- true for a
+        blank optional field, and true for the overwhelming majority of
+        real documents that only partially use it -- a genuine TD2 line
+        ALSO parses as a checksum-valid TD3, because appending extra
+        zero-value filler at the very tail of a checksum payload can
+        never change its weighted sum. So a checksum-based tiebreak
+        between the two is not actually a tiebreak: it silently prefers
+        whichever was tried first, almost regardless of which one is
+        real. (Raw OCR length doesn't help either -- a dedicated MRZ-band
+        pass routinely undercounts a long run of trailing '<' filler, see
+        _reconstruct_length, so a genuine TD3 line just as routinely OCRs
+        under 40 characters. A real production case hit exactly this: a
+        genuine TD3 line2 read at 39 characters was misrouted into
+        parse_td2's offsets by an earlier length-cutoff version of this
+        function, corrupting every checksum on an entirely genuine
+        document.)
+
+        TD3 (passports) is this system's overwhelmingly dominant
+        real-world case, so ambiguous 2-line input defaults to it.
+        parse_td2 is still fully implemented and correct for a caller
+        that already knows its input is TD2 (e.g. a dedicated visa/ID-
+        card scanning path) -- it's just not blindly auto-selected here.
+        """
+        if len(lines) >= 3:
+            return cls.parse_td1(lines[0], lines[1], lines[2])
+        if len(lines) >= 2:
+            return cls.parse_td3(lines[0], lines[1])
+        return None
+
+    @classmethod
     def extract_mrz_from_lines(cls, text_lines: List[str]) -> Optional[Dict[str, Any]]:
         """Scans extracted OCR text lines to find candidate MRZ lines and parses them."""
         cleaned = [cls.clean_mrz_line(l) for l in text_lines if l]
-        
-        # Look for 44-character TD3 pairs
+
+        def is_mrz_shaped(line: str, min_len: int) -> bool:
+            return len(line) >= min_len and '<' in line
+
+        # TD1's 3-line shape is checked first since it's the one signal that
+        # can't be confused with the 2-line formats -- a genuine TD1 triplet
+        # must not be mistaken for a TD2/TD3 pair drawn from just its first
+        # two lines.
+        for i in range(len(cleaned) - 2):
+            l1, l2, l3 = cleaned[i], cleaned[i + 1], cleaned[i + 2]
+            if all(is_mrz_shaped(l, 25) for l in (l1, l2, l3)):
+                return cls.parse_td1(l1, l2, l3)
+
+        # Look for a 2-line pair (TD3, or TD2 -- see _dispatch_by_line_shape's
+        # docstring for why the two aren't auto-distinguished). Requiring the
+        # first line to start with a document-code-like prefix (or at least
+        # contain '<') keeps this from matching arbitrary prose that happens
+        # to contain a stray '<'.
         for i in range(len(cleaned) - 1):
             l1, l2 = cleaned[i], cleaned[i + 1]
-            if len(l1) >= 40 and len(l2) >= 40 and ('<' in l1 or '<' in l2):
-                if l1.startswith('P') or '<' in l1:
-                    return cls.parse_td3(l1, l2)
+            if is_mrz_shaped(l1, 30) and is_mrz_shaped(l2, 30) and (l1.startswith('P') or '<' in l1):
+                return cls._dispatch_by_line_shape([l1, l2])
 
         # Fallback: look for lines containing multiple '<<'
         mrz_candidates = [l for l in cleaned if l.count('<') >= 4 and len(l) >= 30]
         if len(mrz_candidates) >= 2:
-            return cls.parse_td3(mrz_candidates[0], mrz_candidates[1])
+            return cls._dispatch_by_line_shape(mrz_candidates[:3])
 
         return None
 
@@ -232,9 +494,8 @@ class MRZService:
         MRZ pass often doesn't capture a long run of near-invisible trailing '<'
         filler even when every character it did read is correct -- parse_td3
         right-pads short-but-accurate lines to 44 chars, so no length gate is
-        needed once the lines are already known to be the MRZ.
+        needed once the lines are already known to be the MRZ. Line count alone
+        (2 vs 3) tells the caller's isolated band apart as TD1 vs a 2-line format.
         """
         cleaned = [cls.clean_mrz_line(l) for l in text_lines if l]
-        if len(cleaned) >= 2:
-            return cls.parse_td3(cleaned[0], cleaned[1])
-        return None
+        return cls._dispatch_by_line_shape(cleaned)

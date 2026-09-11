@@ -21,14 +21,71 @@ class TesseractOCRService(BaseOCRService):
         if os.path.exists(settings.TESSERACT_PATH):
             pytesseract.pytesseract.tesseract_cmd = settings.TESSERACT_PATH
 
+    @staticmethod
+    def _estimate_skew_angle(gray: np.ndarray) -> float:
+        """
+        Estimates a document photo's rotation from the minimum-area bounding
+        box of its dark (text/print) pixels -- reliable on a mostly-text
+        document since printed lines dominate the foreground's orientation.
+
+        cv2.minAreaRect's angle is relative to whichever of the box's two
+        sides it reports first, which flips depending on the box's own
+        aspect ratio: when the box's reported width is its SHORT side
+        (w < h), the angle is 90 degrees off from the rotation that would
+        make on-page text run horizontal. Verified empirically against known
+        rotations rather than assumed, since this convention has changed
+        across OpenCV versions.
+
+        Returns 0.0 when there isn't enough foreground to estimate
+        confidently, or when the estimate is implausibly large (more likely
+        a bad fit on sparse/non-text content than a real extreme tilt).
+        """
+        inverted = cv2.bitwise_not(gray)
+        _, thresh = cv2.threshold(inverted, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        coords = cv2.findNonZero(thresh)
+        if coords is None or len(coords) < 100:
+            return 0.0
+
+        (w, h), angle = cv2.minAreaRect(coords)[1:]
+        correction = angle + 90 if w < h else angle
+
+        if abs(correction) > 20:
+            return 0.0
+        return correction
+
+    @staticmethod
+    def _deskew(gray: np.ndarray) -> np.ndarray:
+        """
+        Rotates a document photo so printed text lines run horizontal.
+
+        A photographed (rather than flatbed-scanned) document is rarely
+        perfectly axis-aligned. That matters twice over here: a tilted MRZ
+        line is measurably harder for Tesseract to read character-perfectly
+        even when it's otherwise sharp -- and a single misread character
+        fails an MRZ checksum outright -- and extract_mrz_lines crops a
+        FIXED bottom fraction of the image to isolate the MRZ band, which a
+        several-degree rotation can shift enough to clip or unevenly split
+        across that fixed boundary.
+        """
+        angle = TesseractOCRService._estimate_skew_angle(gray)
+        if abs(angle) < 0.3:
+            return gray  # not worth the interpolation cost/risk on a near-straight image
+
+        h, w = gray.shape[:2]
+        matrix = cv2.getRotationMatrix2D((w / 2, h / 2), angle, 1.0)
+        return cv2.warpAffine(
+            gray, matrix, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE
+        )
+
     def preprocess_image(self, image_path: str) -> np.ndarray:
         """
         OpenCV image preprocessing pipeline:
         1. Read image
         2. Resize / normalize resolution (e.g. 1500px width minimum)
         3. Convert to grayscale
-        4. CLAHE contrast enhancement
-        5. Denoise
+        4. Deskew (correct rotation from an off-angle photo)
+        5. CLAHE contrast enhancement
+        6. Denoise
         """
         img = cv2.imread(image_path)
         if img is None:
@@ -41,6 +98,7 @@ class TesseractOCRService(BaseOCRService):
         resized = cv2.resize(img, (target_w, target_h), interpolation=cv2.INTER_CUBIC)
 
         gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
+        gray = self._deskew(gray)
 
         # Contrast Limited Adaptive Histogram Equalization
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
@@ -66,14 +124,20 @@ class TesseractOCRService(BaseOCRService):
         if img is None:
             return []
 
-        h, w = img.shape[:2]
-        # ICAO 9303 places the MRZ in the bottom portion of the bio-data page;
-        # crop generously (bottom 25%) so both TD3 lines fit with margin.
-        band = img[int(h * 0.75):h, 0:w]
-        if band.size == 0:
-            return []
+        # Deskew the FULL image before cropping -- the crop below takes a
+        # fixed bottom fraction, and an off-angle photo shifts the MRZ band
+        # unevenly (one end down, the other up) relative to that fixed line,
+        # which correcting only after cropping can't undo.
+        full_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        full_gray = self._deskew(full_gray)
 
-        band_gray = cv2.cvtColor(band, cv2.COLOR_BGR2GRAY)
+        h, w = full_gray.shape[:2]
+        # ICAO 9303 places the MRZ in the bottom portion of the bio-data page;
+        # crop generously (bottom 30%) so TD1's 3 lines fit with margin
+        # (TD3/TD2's 2 lines fit comfortably within the same crop).
+        band_gray = full_gray[int(h * 0.70):h, 0:w]
+        if band_gray.size == 0:
+            return []
 
         # Upscale substantially -- small monospace glyphs need real pixel height
         # for Tesseract to resolve them reliably.
