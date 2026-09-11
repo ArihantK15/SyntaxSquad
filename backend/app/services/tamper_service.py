@@ -3,7 +3,7 @@ import cv2
 import numpy as np
 import torch
 from abc import ABC, abstractmethod
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from pathlib import Path
 
 from app.core.config import settings
@@ -38,6 +38,28 @@ class TamperDetectionService(BaseTamperService):
                 self.cnn_ready = True
             except Exception:
                 self.cnn_ready = False
+
+    @staticmethod
+    def _aggregate_tamper_score(mean_ela: float, cnn_tamper_prob: Optional[float], signals: List[Dict[str, Any]]) -> float:
+        """
+        Combines the ELA baseline, the trained CNN's patch-level probability,
+        and any heuristic signals into a single 0.0-1.0 tamper risk score.
+        """
+        base_score = mean_ela * 2.0
+        if cnn_tamper_prob is not None:
+            # Scaled to 0.85 rather than 1.0 to leave headroom reflecting the
+            # model's own measured accuracy (87.8% validation) -- but high
+            # enough that a maximally confident detection can independently
+            # clear the HIGH threshold (0.70) instead of being diluted to a
+            # MEDIUM nudge regardless of how certain the model is.
+            base_score = max(base_score, cnn_tamper_prob * 0.85)
+        if signals:
+            # Weight each signal's contribution by its own confidence rather
+            # than a flat amount -- a barely-there anomaly (confidence ~0.5)
+            # should not count the same as a near-certain one (confidence ~0.95).
+            base_score += sum(0.25 * sig.get("confidence", 0.8) for sig in signals)
+
+        return min(0.96, max(0.04, round(base_score, 2)))
 
     def analyze_portrait_region(self, img_cv: np.ndarray) -> Dict[str, Any]:
         """
@@ -203,14 +225,7 @@ class TamperDetectionService(BaseTamperService):
             if region_probs:
                 cnn_tamper_prob = max(region_probs)
 
-        # Aggregate tamper risk score (0.0 to 1.0)
-        base_score = mean_ela * 2.0
-        if cnn_tamper_prob is not None:
-            base_score = max(base_score, cnn_tamper_prob * 0.4)
-        if signals:
-            base_score += 0.25 * len(signals)
-
-        tamper_risk = min(0.96, max(0.04, round(base_score, 2)))
+        tamper_risk = self._aggregate_tamper_score(mean_ela, cnn_tamper_prob, signals)
 
         if tamper_risk >= 0.70:
             risk_level = "CRITICAL" if tamper_risk >= 0.85 else "HIGH"
