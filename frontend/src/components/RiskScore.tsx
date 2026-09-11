@@ -1,6 +1,6 @@
 import React from 'react';
 import { RiskLevel } from '../types';
-import { ShieldAlert, ShieldCheck, AlertTriangle, ShieldX } from 'lucide-react';
+import { ShieldAlert, ShieldCheck, AlertTriangle, ShieldX, Info } from 'lucide-react';
 
 interface RiskScoreProps {
   score: number;
@@ -114,9 +114,6 @@ export const RiskScore: React.FC<RiskScoreProps> = ({
             <span className={`text-xl font-bold font-mono tracking-wider uppercase ${theme.textColor}`}>
               {level} RISK
             </span>
-            <span className="text-xs px-2 py-0.5 rounded bg-slate-800/80 text-slate-400 font-mono">
-              COMPOSITE INDEX
-            </span>
           </div>
 
           <div className="p-2.5 rounded-lg bg-slate-900/80 border border-slate-800">
@@ -128,8 +125,8 @@ export const RiskScore: React.FC<RiskScoreProps> = ({
             </p>
           </div>
 
-          <p className="text-[11px] text-slate-400 flex items-center gap-1">
-            <span>ℹ️</span> AI decision-support indicator. Final border determination rests with the screening officer.
+          <p className="text-[11px] text-slate-400 flex items-center gap-1.5">
+            <Info className="w-3 h-3 shrink-0" /> AI decision-support indicator. Final border determination rests with the screening officer.
           </p>
         </div>
       </div>

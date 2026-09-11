@@ -11,10 +11,12 @@ import { FaceVerification } from '../components/FaceVerification';
 import { EvidenceList } from '../components/EvidenceList';
 import { AuditTimeline } from '../components/AuditTimeline';
 import { Tabs, TabItem } from '../components/Tabs';
+import { downloadCaseReportPdf } from '../lib/pdfExport';
 import {
   ArrowLeft,
   Loader2,
   RefreshCw,
+  Download,
   FileText,
   ShieldCheck,
   Flame,
@@ -40,6 +42,7 @@ interface CaseDetailPageProps {
 export const CaseDetailPage: React.FC<CaseDetailPageProps> = ({ caseId, onBack }) => {
   const [caseData, setCaseData] = useState<CaseDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [exportingPdf, setExportingPdf] = useState(false);
 
   useEffect(() => {
     fetchCase();
@@ -121,6 +124,17 @@ export const CaseDetailPage: React.FC<CaseDetailPageProps> = ({ caseId, onBack }
         : `/uploads/documents/${analysis.document_image_path.split('/').pop()}`)
     : undefined;
 
+  const handleDownloadPdf = async () => {
+    try {
+      setExportingPdf(true);
+      await downloadCaseReportPdf({ caseData, analysis, riskBreakdown, docImgUrl });
+    } catch (err: any) {
+      alert(`Failed to generate PDF report: ${err.message}`);
+    } finally {
+      setExportingPdf(false);
+    }
+  };
+
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-12">
       {/* Navigation and Refresh Bar */}
@@ -133,14 +147,26 @@ export const CaseDetailPage: React.FC<CaseDetailPageProps> = ({ caseId, onBack }
           <span>Back to Screening Operations</span>
         </button>
 
-        <button
-          onClick={fetchCase}
-          className="p-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200 transition-colors text-xs flex items-center gap-1.5 font-mono cursor-pointer"
-          title="Refresh case data"
-        >
-          <RefreshCw className="w-3.5 h-3.5" />
-          <span>Refresh</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleDownloadPdf}
+            disabled={exportingPdf}
+            className="p-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200 transition-colors text-xs flex items-center gap-1.5 font-mono cursor-pointer disabled:opacity-50"
+            title="Download a PDF summary of this case"
+          >
+            {exportingPdf ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+            <span>{exportingPdf ? 'Preparing PDF...' : 'Download PDF'}</span>
+          </button>
+
+          <button
+            onClick={fetchCase}
+            className="p-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200 transition-colors text-xs flex items-center gap-1.5 font-mono cursor-pointer"
+            title="Refresh case data"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span>Refresh</span>
+          </button>
+        </div>
       </div>
 
       {/* Case Header & Decision Form */}

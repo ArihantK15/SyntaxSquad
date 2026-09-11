@@ -26,7 +26,7 @@ export const MRZValidator: React.FC<MRZValidatorProps> = ({ mrz, validation }) =
     <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 backdrop-blur space-y-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Binary className="w-4 h-4 text-cyan-400" />
+          <Binary className="w-4 h-4 text-slate-500" />
           <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-200">
             Module 2: ICAO 9303 MRZ Validation
           </h3>
@@ -48,10 +48,10 @@ export const MRZValidator: React.FC<MRZValidatorProps> = ({ mrz, validation }) =
         <span className="text-[10px] font-mono text-slate-400 block mb-1 uppercase tracking-wider">
           Format: {mrz.format} (2 lines x 44 chars)
         </span>
-        <div className="font-mono text-xs sm:text-sm tracking-widest text-cyan-300 break-all select-all font-semibold">
+        <div className="font-mono text-xs sm:text-sm tracking-widest text-slate-200 break-all select-all font-semibold">
           {mrz.line1}
         </div>
-        <div className="font-mono text-xs sm:text-sm tracking-widest text-cyan-300 break-all select-all font-semibold">
+        <div className="font-mono text-xs sm:text-sm tracking-widest text-slate-200 break-all select-all font-semibold">
           {mrz.line2}
         </div>
       </div>

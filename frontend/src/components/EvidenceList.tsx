@@ -19,7 +19,7 @@ export const EvidenceList: React.FC<EvidenceListProps> = ({ signals }) => {
     <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 backdrop-blur space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-2">
-          <ShieldAlert className="w-4 h-4 text-cyan-400" />
+          <ShieldAlert className="w-4 h-4 text-slate-500" />
           <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-200">
             Forensic Evidence & Signals ({signals.length})
           </h3>
@@ -33,7 +33,7 @@ export const EvidenceList: React.FC<EvidenceListProps> = ({ signals }) => {
               onClick={() => setFilter(lvl)}
               className={`px-2 py-0.5 rounded transition-colors cursor-pointer ${
                 filter === lvl
-                  ? 'bg-cyan-950 text-cyan-300 font-bold border border-cyan-500/30'
+                  ? 'bg-slate-800 text-slate-200 font-bold border border-slate-700'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >

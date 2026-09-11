@@ -87,34 +87,34 @@ export const CaseHeader: React.FC<CaseHeaderProps> = ({
 
           <div className="flex flex-wrap items-center gap-4 text-xs font-mono text-slate-400 mt-2">
             <span className="flex items-center gap-1.5">
-              <Globe className="w-3.5 h-3.5 text-cyan-400" />
+              <Globe className="w-3.5 h-3.5 text-slate-500" />
               {caseData.country || 'Unknown Jurisdiction'}
             </span>
             <span className="flex items-center gap-1.5">
-              <FileText className="w-3.5 h-3.5 text-cyan-400" />
+              <FileText className="w-3.5 h-3.5 text-slate-500" />
               {caseData.document_type}
             </span>
             <span className="flex items-center gap-1.5">
-              <Clock className="w-3.5 h-3.5 text-cyan-400" />
+              <Clock className="w-3.5 h-3.5 text-slate-500" />
               {createdFormatted}
             </span>
           </div>
         </div>
 
-        {/* Action Controls */}
-        <div className="flex items-center gap-2">
+        {/* Action Controls -- kept low-emphasis so they don't compete with the case's own risk content */}
+        <div className="flex items-center gap-3 text-xs font-mono">
           {!caseData.biometrics_purged ? (
             <button
               onClick={handlePurgeBiometrics}
               disabled={purging}
-              className="text-xs font-mono text-amber-300 hover:text-amber-200 bg-amber-950/40 hover:bg-amber-900/50 px-3 py-1.5 rounded-lg border border-amber-500/40 transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              className="text-slate-400 hover:text-amber-400 transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
               title="Privacy-by-Design: Purge biometric image files from disk while preserving anonymized record"
             >
-              <Trash2 className="w-3.5 h-3.5 text-amber-400" />
+              <Trash2 className="w-3.5 h-3.5" />
               <span>{purging ? 'Purging...' : 'Purge Biometrics'}</span>
             </button>
           ) : (
-            <span className="text-[11px] font-mono text-slate-500 italic px-2">
+            <span className="text-slate-500 italic">
               Biometrics scrubbed
             </span>
           )}
@@ -122,10 +122,10 @@ export const CaseHeader: React.FC<CaseHeaderProps> = ({
           <button
             onClick={handleDelete}
             disabled={deleting}
-            className="text-xs font-mono text-slate-400 hover:text-rose-400 px-3 py-1.5 rounded-lg border border-slate-800 hover:border-rose-900 transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+            className="text-slate-400 hover:text-rose-400 transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
             title="Delete entire case file"
           >
-            <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+            <Trash2 className="w-3.5 h-3.5" />
             <span>Delete Case</span>
           </button>
         </div>
@@ -135,7 +135,7 @@ export const CaseHeader: React.FC<CaseHeaderProps> = ({
       <form onSubmit={handleSubmit} className="p-4 rounded-xl bg-slate-950/70 border border-slate-800/80 space-y-3">
         <div className="flex items-center justify-between">
           <span className="text-xs font-mono font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
-            <Shield className="w-3.5 h-3.5 text-cyan-400" />
+            <Shield className="w-3.5 h-3.5 text-slate-500" />
             Screening Officer Determination
           </span>
           <span className="text-[11px] font-mono text-slate-400">

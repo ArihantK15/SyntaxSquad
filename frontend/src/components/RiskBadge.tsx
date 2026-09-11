@@ -13,13 +13,13 @@ export const RiskBadge: React.FC<RiskBadgeProps> = ({ level, status, size = 'md'
   let colorClasses = 'bg-slate-800/80 text-slate-300 border-slate-700';
 
   if (text === 'LOW' || text === 'CLEARED' || text === 'LOW_RISK' || text === 'MATCH') {
-    colorClasses = 'bg-emerald-950/60 text-emerald-300 border-emerald-500/40 glow-emerald';
+    colorClasses = 'bg-emerald-950/60 text-emerald-300 border-emerald-500/40';
   } else if (text === 'MEDIUM' || text === 'MEDIUM_RISK' || text === 'ROUTINE VERIFICATION') {
-    colorClasses = 'bg-amber-950/60 text-amber-300 border-amber-500/40 glow-amber';
+    colorClasses = 'bg-amber-950/60 text-amber-300 border-amber-500/40';
   } else if (text === 'HIGH' || text === 'HIGH_RISK' || text === 'REQUIRES_REVIEW' || text === 'REQUIRES_INSPECTION' || text === 'REVIEW_REQUIRED') {
     colorClasses = 'bg-orange-950/60 text-orange-300 border-orange-500/40';
   } else if (text === 'CRITICAL' || text === 'ESCALATED' || text === 'REJECT') {
-    colorClasses = 'bg-rose-950/60 text-rose-300 border-rose-500/50 glow-red';
+    colorClasses = 'bg-rose-950/60 text-rose-300 border-rose-500/50';
   } else if (text === 'PROCESSING') {
     colorClasses = 'bg-cyan-950/60 text-cyan-300 border-cyan-500/40 animate-pulse';
   }

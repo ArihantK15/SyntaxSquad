@@ -12,7 +12,7 @@ export const RiskBreakdown: React.FC<RiskBreakdownProps> = ({ breakdown, totalSc
     <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 backdrop-blur space-y-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Sliders className="w-4 h-4 text-cyan-400" />
+          <Sliders className="w-4 h-4 text-slate-500" />
           <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-200">
             Explainable Risk Breakdown
           </h3>
@@ -29,7 +29,7 @@ export const RiskBreakdown: React.FC<RiskBreakdownProps> = ({ breakdown, totalSc
             <div key={idx} className="space-y-1.5">
               <div className="flex items-center justify-between text-xs font-mono">
                 <span className="text-slate-300 flex items-center gap-2">
-                  <span className="text-cyan-400 font-bold">+{item.weighted_contribution.toFixed(1)}</span>
+                  <span className="text-slate-200 font-bold">+{item.weighted_contribution.toFixed(1)}</span>
                   <span>{item.factor}</span>
                   <span className="text-[10px] text-slate-400">({Math.round(item.weight * 100)}% Weight)</span>
                 </span>
@@ -41,7 +41,7 @@ export const RiskBreakdown: React.FC<RiskBreakdownProps> = ({ breakdown, totalSc
               {/* Progress bar */}
               <div className="w-full bg-slate-950 h-2 rounded-full overflow-hidden border border-slate-800/80">
                 <div
-                  className="h-full bg-gradient-to-r from-cyan-500 to-blue-500 rounded-full transition-all duration-700"
+                  className="h-full bg-slate-500 rounded-full transition-all duration-700"
                   style={{ width: `${Math.min(100, Math.max(0, item.raw_risk))}%` }}
                 ></div>
               </div>

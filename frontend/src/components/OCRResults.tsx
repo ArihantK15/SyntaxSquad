@@ -40,7 +40,7 @@ export const OCRResults: React.FC<OCRResultsProps> = ({ data }) => {
     <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 backdrop-blur space-y-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <FileText className="w-4 h-4 text-cyan-400" />
+          <FileText className="w-4 h-4 text-slate-500" />
           <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-200">
             Module 1: OCR Extraction
           </h3>
@@ -49,7 +49,7 @@ export const OCRResults: React.FC<OCRResultsProps> = ({ data }) => {
         {/* Confidence Meter */}
         <div className="flex items-center gap-2">
           <span className="text-[11px] font-mono text-slate-400">Confidence:</span>
-          <span className="text-xs font-mono font-bold text-cyan-300 px-2 py-0.5 rounded bg-cyan-950/80 border border-cyan-500/30">
+          <span className="text-xs font-mono font-bold text-slate-200 px-2 py-0.5 rounded bg-slate-800 border border-slate-700">
             {confPercent}%
           </span>
         </div>

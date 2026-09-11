@@ -29,7 +29,7 @@ export const TamperHeatmap: React.FC<TamperHeatmapProps> = ({
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-2">
-          <Layers className="w-4 h-4 text-cyan-400" />
+          <Layers className="w-4 h-4 text-slate-500" />
           <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-200">
             Module 3: Tamper AI & Error Level Analysis (ELA)
           </h3>
@@ -64,11 +64,11 @@ export const TamperHeatmap: React.FC<TamperHeatmapProps> = ({
             onClick={() => setViewMode('heatmap')}
             className={`px-2.5 py-1 rounded transition-colors cursor-pointer flex items-center gap-1.5 ${
               viewMode === 'heatmap'
-                ? 'bg-cyan-950 text-cyan-300 border border-cyan-500/40 font-semibold'
+                ? 'bg-slate-800 text-slate-200 border border-slate-700 font-semibold'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            <Flame className="w-3 h-3 text-orange-400" />
+            <Flame className="w-3 h-3" />
             ELA Heatmap
           </button>
           <button
@@ -102,7 +102,7 @@ export const TamperHeatmap: React.FC<TamperHeatmapProps> = ({
               </div>
             </div>
             <div>
-              <span className="text-[10px] font-mono text-orange-400 mb-1 block uppercase flex items-center gap-1">
+              <span className="text-[10px] font-mono text-slate-400 mb-1 block uppercase flex items-center gap-1">
                 <Flame className="w-3 h-3" /> ELA Thermal Heatmap Overlay
               </span>
               <div className="relative rounded-lg overflow-hidden bg-black/40 border border-slate-800 aspect-[16/10] flex items-center justify-center">

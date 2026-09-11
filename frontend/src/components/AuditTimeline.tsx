@@ -19,7 +19,7 @@ export const AuditTimeline: React.FC<AuditTimelineProps> = ({ logs }) => {
     <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 backdrop-blur space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-2">
-          <History className="w-4 h-4 text-cyan-400" />
+          <History className="w-4 h-4 text-slate-500" />
           <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-200">
             Chain of Custody & Cryptographic Ledger ({logs.length} Blocks)
           </h3>
@@ -34,7 +34,6 @@ export const AuditTimeline: React.FC<AuditTimelineProps> = ({ logs }) => {
 
       <div className="relative pl-6 border-l-2 border-slate-800 space-y-4">
         {logs.map((item, idx) => {
-          const isOfficer = item.actor.includes('OFFICER');
           const isPurge = item.action.includes('PURGE');
           const dateFormatted = new Date(item.timestamp).toLocaleTimeString([], {
             hour: '2-digit',
@@ -47,7 +46,7 @@ export const AuditTimeline: React.FC<AuditTimelineProps> = ({ logs }) => {
               {/* Dot indicator */}
               <div
                 className={`absolute -left-[31px] top-1 h-3.5 w-3.5 rounded-full border-2 border-slate-950 flex items-center justify-center ${
-                  isOfficer ? 'bg-cyan-500' : isPurge ? 'bg-amber-500' : 'bg-blue-600'
+                  isPurge ? 'bg-amber-500' : 'bg-slate-500'
                 }`}
               ></div>
 
@@ -62,9 +61,7 @@ export const AuditTimeline: React.FC<AuditTimelineProps> = ({ logs }) => {
                       {item.action.replace(/_/g, ' ')}
                     </span>
                     <span className={`px-1.5 py-0.2 rounded text-[10px] font-medium ${
-                      isOfficer
-                        ? 'bg-cyan-950 text-cyan-300 border border-cyan-500/30'
-                        : isPurge
+                      isPurge
                         ? 'bg-amber-950 text-amber-300 border border-amber-500/30'
                         : 'bg-slate-800 text-slate-300'
                     }`}>
@@ -75,10 +72,10 @@ export const AuditTimeline: React.FC<AuditTimelineProps> = ({ logs }) => {
                   <div className="flex items-center gap-2">
                     {item.entry_hash && (
                       <span
-                        className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800 text-cyan-400 flex items-center gap-1"
+                        className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-400 flex items-center gap-1"
                         title={`Block Hash: ${item.entry_hash}\nPrevious: ${item.previous_hash || 'GENESIS'}`}
                       >
-                        <FileKey className="w-2.5 h-2.5 text-cyan-500" />
+                        <FileKey className="w-2.5 h-2.5" />
                         #{item.entry_hash.substring(0, 6)}...{item.entry_hash.substring(60)}
                       </span>
                     )}
