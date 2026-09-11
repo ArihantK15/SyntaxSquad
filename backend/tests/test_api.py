@@ -31,6 +31,28 @@ def test_dashboard_stats_endpoint():
     assert data["documents_screened"] >= 0
     assert "risk_distribution" in data
 
+def test_dashboard_latency_breakdown_reflects_real_audit_timestamps():
+    """
+    latency_breakdown used to not exist -- the "Component Processing
+    Latency" chart on the Analytics page was a hardcoded array
+    (Normalization: 140ms, OCR: 520ms, ...) never measured from anything.
+    Every case's audit trail already timestamps each pipeline step
+    (DOCUMENT_UPLOADED, OCR_COMPLETED, MRZ_VALIDATED, ...), so the per-module
+    average can be computed for real from those deltas. Run an actual
+    scenario and confirm each module's reported time is a genuine
+    measurement (backed by at least one real sample), not a placeholder.
+    """
+    demo_res = client.post("/api/demo/scenario", json={"scenario_key": "genuine"})
+    assert demo_res.status_code == 200
+
+    stats = client.get("/api/dashboard/stats").json()
+    breakdown = {b["module"]: b for b in stats["latency_breakdown"]}
+    assert "OCR Extraction" in breakdown
+    assert "Risk Engine" in breakdown
+    for module in breakdown.values():
+        assert module["sample_count"] >= 1
+        assert module["time_ms"] > 0
+
 def test_cases_list_endpoint():
     response = client.get("/api/cases")
     assert response.status_code == 200

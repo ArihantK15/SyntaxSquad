@@ -201,6 +201,7 @@ class DashboardStatsOut(BaseModel):
     cleared_cases: int
     avg_processing_time_ms: float
     risk_distribution: Dict[str, int] # {"LOW": 12, "MEDIUM": 5, "HIGH": 4, "CRITICAL": 2}
+    latency_breakdown: List[Dict[str, Any]] # [{"module": "OCR Extraction", "time_ms": 512.3, "sample_count": 41}, ...]
     document_types: Dict[str, int]
     top_risk_reasons: List[Dict[str, Any]]
     recent_cases: List[CaseOut]

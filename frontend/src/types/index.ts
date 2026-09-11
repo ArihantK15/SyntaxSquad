@@ -184,6 +184,7 @@ export interface DashboardStats {
   cleared_cases: number;
   avg_processing_time_ms: number;
   risk_distribution: Record<RiskLevel, number>;
+  latency_breakdown: Array<{ module: string; time_ms: number; sample_count: number }>;
   document_types: Record<string, number>;
   top_risk_reasons: Array<{ reason: string; count: number }>;
   recent_cases: CaseItem[];

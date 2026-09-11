@@ -55,14 +55,13 @@ export const AnalyticsPage: React.FC = () => {
     count: v
   }));
 
-  const latencyBreakdown = [
-    { module: 'Normalization', time: 140 },
-    { module: 'OCR Extraction', time: 520 },
-    { module: 'MRZ Checksums', time: 90 },
-    { module: 'Tamper AI (ELA)', time: 820 },
-    { module: 'Face Verification', time: 480 },
-    { module: 'Risk Engine', time: 50 },
-  ];
+  // Real per-module averages computed server-side from each case's own audit
+  // trail timestamps (see backend/app/api/routes/dashboard.py) -- a module
+  // with zero completed cases so far reports 0ms rather than a guess.
+  const latencyBreakdown = stats.latency_breakdown.map((entry) => ({
+    module: entry.module,
+    time: entry.time_ms
+  }));
 
   return (
     <div className="space-y-6">

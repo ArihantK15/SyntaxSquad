@@ -1,5 +1,6 @@
 import os
 import re
+import time
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.orm import Session
@@ -165,6 +166,14 @@ def run_demo_scenario(scenario_key: str = Body(..., embed=True), db: Session = D
 
     AuditService.log(db, "DOCUMENT_UPLOADED", case_uid, metadata={"scenario": cfg["title"], "specimen": doc_filename})
 
+    # Real wall-clock timing per step -- this used to be a hardcoded
+    # processing_time_ms=2100.0 below, which fed a fake-looking-real number
+    # into the dashboard's "Average Pipeline Latency" KPI for every demo-
+    # generated case (the majority of cases in this database). Measuring it
+    # for real here matches what the manual screening flow (screening.py)
+    # already does per step.
+    step_start = time.perf_counter()
+
     # Step 2: OCR
     ocr_svc = get_ocr_service()
     ocr_result = ocr_svc.extract_text(doc_path)
@@ -205,6 +214,8 @@ def run_demo_scenario(scenario_key: str = Body(..., embed=True), db: Session = D
         watchlist_match=watchlist_match
     )
 
+    total_processing_ms = (time.perf_counter() - step_start) * 1000.0
+
     # Finalize Case
     new_case.risk_score = risk_res["risk_score"]
     new_case.risk_level = risk_res["risk_level"]
@@ -223,7 +234,7 @@ def run_demo_scenario(scenario_key: str = Body(..., embed=True), db: Session = D
         tamper_result=tamper_result,
         face_result=face_result,
         risk_breakdown=risk_res["breakdown"],
-        processing_time_ms=2100.0
+        processing_time_ms=round(total_processing_ms, 1)
     )
     db.add(analysis)
 
