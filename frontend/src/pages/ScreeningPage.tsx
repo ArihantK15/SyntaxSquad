@@ -53,14 +53,28 @@ export const ScreeningPage: React.FC<ScreeningPageProps> = ({ onScreeningComplet
   const videoRef = useRef<HTMLVideoElement>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
 
+  const [isDraggingDoc, setIsDraggingDoc] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const faceInputRef = useRef<HTMLInputElement>(null);
 
+  const setDoc = (file: File) => {
+    setDocFile(file);
+    setDocPreview(URL.createObjectURL(file));
+  };
+
   const handleDocChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      setDocFile(file);
-      setDocPreview(URL.createObjectURL(file));
+      setDoc(e.target.files[0]);
+    }
+  };
+
+  const handleDocDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDraggingDoc(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file && file.type.startsWith('image/')) {
+      setDoc(file);
     }
   };
 
@@ -300,9 +314,15 @@ export const ScreeningPage: React.FC<ScreeningPageProps> = ({ onScreeningComplet
             />
 
             <div
+              data-testid="doc-dropzone"
               onClick={() => fileInputRef.current?.click()}
+              onDragOver={(e) => { e.preventDefault(); setIsDraggingDoc(true); }}
+              onDragLeave={() => setIsDraggingDoc(false)}
+              onDrop={handleDocDrop}
               className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-all ${
-                docPreview
+                isDraggingDoc
+                  ? 'border-cyan-400 bg-cyan-950/30'
+                  : docPreview
                   ? 'border-cyan-500/50 bg-slate-950/80'
                   : 'border-slate-700 hover:border-cyan-400/50 bg-slate-950/40 hover:bg-slate-950/60'
               }`}
