@@ -2,7 +2,18 @@ import pytest
 from fastapi.testclient import TestClient
 from app.main import app
 
-client = TestClient(app)
+# Starlette's TestClient only runs the app's lifespan (startup/shutdown --
+# here, Base.metadata.create_all plus initial seeding) when entered as a
+# context manager; a bare `TestClient(app)` never triggers it, leaving every
+# DB-backed endpoint below failing with "no such table". Enter it once for
+# the whole module so all tests keep sharing state/order as originally
+# written, and close it after the last test.
+_client_cm = TestClient(app)
+client = _client_cm.__enter__()
+
+
+def teardown_module(module):
+    _client_cm.__exit__(None, None, None)
 
 def test_health_check_endpoint():
     response = client.get("/api/health")

@@ -228,7 +228,9 @@ To execute the automated unit and integration tests across MRZ checksum algorith
 PYTHONPATH=backend ./venv/bin/pytest backend/tests -v
 ```
 
-All 24 automated tests pass with 100% success rate across core logic, ML signals, and security APIs:
+All 41 automated tests pass with 100% success rate across core logic, ML signals, and security APIs. `test_api.py` uses `TestClient` as a context manager so the app's startup lifespan (table creation + seeding) actually runs — a bare `TestClient(app)` silently skips it.
+
+> **Platform note:** `test_api.py::test_demo_scenario_execution` asserts the "genuine" demo scenario scores LOW. The specimen image's exact pixels (and therefore the tamper CNN's score) depend on which font PIL falls back to for text rendering, which differs between macOS (Helvetica) and the Linux container (DejaVu, installed in `backend/Dockerfile`) -- this can occasionally push the score to the MEDIUM/LOW boundary locally on macOS even though it is reliably LOW in the actual deployment target. Docker is the authoritative environment for this test; run it there (`docker compose exec backend python3 -m pytest tests/test_api.py -v` from `backend/`) for a result that matches production.
 
 **API & integration** (`test_api.py`) — health, dashboard stats, case listing, demo scenario execution, officer decisions, SHA-256 blockchain ledger verification, GDPR Art. 17 biometric purge.
 
@@ -239,6 +241,10 @@ All 24 automated tests pass with 100% success rate across core logic, ML signals
 **Risk engine** (`test_risk_engine.py`) — low-risk aggregation, critical tampering + watchlist combination, and the critical-signal floor (an isolated CRITICAL validation signal, and a CRITICAL tamper verdict, must each floor the outcome to at least HIGH regardless of otherwise-clean signals).
 
 **Rules engine** (`test_rules.py`) — genuine/expired/mismatched document rule evaluation.
+
+**Tamper service** (`test_tamper_service.py`) — the score-aggregation formula weights the trained CNN and each heuristic signal by their own confidence rather than flat amounts.
+
+**Watchlist** (`test_watchlist.py`) — exact matches, and bounded fuzzy tolerance (max 1 character edit) so a single OCR misread doesn't hide a real match.
 
 ---
 
