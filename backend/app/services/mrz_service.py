@@ -48,6 +48,19 @@ class MRZService:
         return "".join(res)
 
     @classmethod
+    def normalize_letters(cls, text: str) -> str:
+        """
+        The mirror image of normalize_digits, for strictly alphabetic MRZ
+        fields (country, nationality -- ICAO 3166-1 alpha-3 codes). Any digit
+        appearing here is necessarily OCR noise, since these fields can never
+        legitimately contain one; correct it back to its most visually
+        similar letter rather than let it flow through and fail a downstream
+        alpha-format check on an otherwise genuine document.
+        """
+        subs = {'0': 'O', '1': 'I', '2': 'Z', '5': 'S', '8': 'B'}
+        return "".join(subs.get(ch, ch) for ch in text.upper())
+
+    @classmethod
     def _reconstruct_length(cls, s: str, target_len: int) -> str:
         """
         Pads a short OCR'd MRZ line to target_len characters.
@@ -86,7 +99,7 @@ class MRZService:
         line2 = cls._reconstruct_length(cls.clean_mrz_line(line2), 44)
 
         doc_type = line1[0:2].replace('<', '')
-        country = line1[2:5].replace('<', '')
+        country = cls.normalize_letters(line1[2:5].replace('<', ''))
         
         name_section = line1[5:]
         name_parts = name_section.split('<<')
@@ -100,7 +113,7 @@ class MRZService:
         doc_number = doc_number_raw.replace('<', '')
         doc_number_cd = cls.normalize_digits(line2[9])
         
-        nationality = line2[10:13].replace('<', '')
+        nationality = cls.normalize_letters(line2[10:13].replace('<', ''))
         
         dob_raw = cls.normalize_digits(line2[13:19])
         dob_cd = cls.normalize_digits(line2[19])

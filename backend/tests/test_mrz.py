@@ -113,6 +113,46 @@ def test_composite_checksum_survives_ocr_digit_letter_confusion():
     assert result["is_valid"] is True
 
 
+def test_nationality_survives_ocr_letter_digit_confusion():
+    """
+    Reproduces a real false positive found on a genuine generated specimen:
+    Tesseract read the printed MRZ nationality code 'UTO' as 'UT0' (letter
+    'O' misread as digit '0'). Unlike the numeric fields (doc number, dates),
+    nationality/country are taken raw with no OCR-noise correction, so this
+    single-character OCR slip flowed straight through parse_td3 into
+    DocumentRulesEngine's alpha-format check, which flagged an entirely
+    genuine document with a "Malformed Nationality Code" signal.
+    """
+    line1 = "P<UTOKAUL<<ARIHANT<<<<<<<<<<<<<<<<<<<<<<"
+    doc_raw, dob_raw, exp_raw = "X1234567<", "000101", "300101"
+    doc_cd = MRZService.compute_check_digit(doc_raw)
+    dob_cd = MRZService.compute_check_digit(dob_raw)
+    exp_cd = MRZService.compute_check_digit(exp_raw)
+    opt_raw = "<" * 15
+    comp_cd = MRZService.compute_check_digit(doc_raw + doc_cd + dob_raw + dob_cd + exp_raw + exp_cd + opt_raw)
+
+    # OCR misread nationality 'UTO' as 'UT0'.
+    line2 = f"{doc_raw}{doc_cd}UT0{dob_raw}{dob_cd}M{exp_raw}{exp_cd}{opt_raw}{comp_cd}"
+
+    result = MRZService.parse_td3(line1, line2)
+    assert result["nationality"] == "UTO"
+
+
+def test_country_survives_ocr_letter_digit_confusion():
+    """Same OCR-noise problem, but for line1's country code."""
+    line1 = "P<UT0KAUL<<ARIHANT<<<<<<<<<<<<<<<<<<<<<<"
+    doc_raw, dob_raw, exp_raw = "X1234567<", "000101", "300101"
+    doc_cd = MRZService.compute_check_digit(doc_raw)
+    dob_cd = MRZService.compute_check_digit(dob_raw)
+    exp_cd = MRZService.compute_check_digit(exp_raw)
+    opt_raw = "<" * 15
+    comp_cd = MRZService.compute_check_digit(doc_raw + doc_cd + dob_raw + dob_cd + exp_raw + exp_cd + opt_raw)
+    line2 = f"{doc_raw}{doc_cd}UTO{dob_raw}{dob_cd}M{exp_raw}{exp_cd}{opt_raw}{comp_cd}"
+
+    result = MRZService.parse_td3(line1, line2)
+    assert result["country"] == "UTO"
+
+
 def test_parse_pre_isolated_lines_handles_short_ocr_output():
     """A dedicated MRZ-band OCR pass may return lines shorter than 44 chars if
     the trailing filler run was undercounted; parse_pre_isolated_lines must
