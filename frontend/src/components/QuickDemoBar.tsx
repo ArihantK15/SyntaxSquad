@@ -16,6 +16,7 @@ export const QuickDemoBar: React.FC<QuickDemoBarProps> = ({ onScenarioLoaded }) 
     { key: 'photo_replacement', label: '3. Photo Replacement', desc: 'Spliced portrait seam, biometric mismatch' },
     { key: 'expired', label: '4. Expired Document', desc: 'Expired travel validity, rule engine trigger' },
     { key: 'multiple_anomalies', label: '5. Multiple Anomalies', desc: 'Tampered MRZ + replaced photo + demo watchlist' },
+    { key: 'watchlist_evasion', label: '6. Watchlist Evasion Attempt', desc: 'Clean document, but name & number are 1-character off a flagged record' },
   ];
 
   const handleRun = async () => {

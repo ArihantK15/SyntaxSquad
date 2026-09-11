@@ -89,6 +89,25 @@ SCENARIO_CONFIGS = {
         "dob": "850704",
         "expiry": "270420",
         "doc_face_photo": PERSON_A, "live_face_photo": PERSON_B  # mismatch, like photo_replacement
+    },
+    "watchlist_evasion": {
+        "title": "Watchlist Evasion Attempt",
+        "mode": "genuine",
+        "surname": "KOROL",
+        "given_names": "VICTOR",  # 'VIKTOR' -> 'VICTOR': one-letter difference from the watchlist name
+        "country_code": "ATL",
+        "country_name": "ATLANTIS FEDERATION",
+        "doc_number": "P8B92144",  # 'P8892144' -> 'P8B92144': one-character difference (8 -> B)
+        "nationality": "ATLANTIAN",
+        "dob": "850704",
+        "expiry": "300420",
+        # Every other signal is deliberately clean (valid MRZ, no tamper, face
+        # match) so the demo isolates one thing: a document number and name
+        # each a single edit away from a real watchlist entry (WL-SIM-2026-081,
+        # "VIKTOR KOROL" / "P8892144") still gets caught. An exact-match-only
+        # watchlist check -- what this system had before tonight -- would
+        # have missed both and cleared this traveler as LOW risk.
+        "doc_face_photo": PERSON_A, "live_face_photo": PERSON_A
     }
 }
 

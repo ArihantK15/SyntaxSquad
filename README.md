@@ -275,6 +275,7 @@ Use the top toolbar **"Demo scenario"** selector to demonstrate predefined test 
 3. **Photo Replacement:** Document photo is Person A, live capture is Person B — a genuine biometric mismatch, not a scripted one $\rightarrow$ `MEDIUM RISK — ROUTINE VERIFICATION` (face similarity ~0.64 REVIEW_REQUIRED, plus a real edge-discontinuity splice signal).
 4. **Expired Document:** Travel validity expired before present calendar date $\rightarrow$ `HIGH RISK — SECONDARY INSPECTION` (an expired document is a CRITICAL, deterministic rule violation, floored to HIGH regardless of how clean the biometric/tamper signals are).
 5. **Multiple Anomalies:** Tampered MRZ + mismatched face + simulated watchlist hit $\rightarrow$ `HIGH RISK — SECONDARY INSPECTION`.
+6. **Watchlist Evasion Attempt:** Every signal looks clean — valid MRZ, matching face, no tamper — except the traveler's name and document number are each a single character off from a real watchlist entry $\rightarrow$ `HIGH RISK — SECONDARY INSPECTION`. Demonstrates the bounded fuzzy-matching fix: an exact-match-only watchlist check would have missed this entirely and cleared the traveler as LOW risk.
 
 Manual "New Screening" uploads can use the same specimens directly: `demo-data/samples/specimen_*.jpg` paired with `sample_live_face.jpg` (matching person, for a MATCH result) or `sample_live_face_mismatch.jpg` (different person, for a REVIEW_REQUIRED result).
 

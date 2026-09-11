@@ -66,6 +66,33 @@ def test_demo_scenario_execution():
         assert "raw_risk" in factor
         assert "weighted_contribution" in factor
 
+def test_watchlist_evasion_scenario_still_flags_near_miss():
+    """
+    The 'watchlist_evasion' demo scenario is a document with a valid MRZ, a
+    matching face, and no tamper signals -- everything about it looks clean
+    except that the name and document number are each a single character
+    away from a real watchlist entry (WL-SIM-2026-081). An exact-match-only
+    watchlist check (what this system had before the fuzzy-matching fix)
+    would have missed both and cleared this as LOW risk; the fuzzy check
+    must still catch it and floor the outcome to at least HIGH, since a
+    CRITICAL-severity watchlist hit is a hard-stop regardless of how clean
+    every other signal is.
+    """
+    response = client.post("/api/demo/scenario", json={"scenario_key": "watchlist_evasion"})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["risk_level"] in ("HIGH", "CRITICAL")
+
+    detail = client.get(f"/api/cases/{data['case_id']}").json()
+    analysis = detail["analyses"][0]
+    assert analysis["mrz_result"]["is_valid"] is True
+    assert analysis["face_result"]["status"] == "MATCH"
+    assert analysis["tamper_result"]["risk_level"] in ("LOW", "MEDIUM")
+
+    breakdown = analysis["risk_breakdown"]
+    watchlist_factor = next(b for b in breakdown if b["factor"] == "Simulated Watchlist Adapter")
+    assert watchlist_factor["raw_risk"] == 100.0
+
 def test_officer_decision_recording():
     # Fetch first case
     cases_res = client.get("/api/cases?limit=1")
