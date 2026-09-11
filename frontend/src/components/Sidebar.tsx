@@ -91,9 +91,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </span>
           <span className="text-emerald-400 font-bold">ONLINE</span>
         </div>
-        <div className="flex items-center justify-between text-[11px] font-mono text-slate-400">
-          <span>Watchlist Adapter</span>
-          <span className="text-cyan-400">Sandbox Demo</span>
+        <div className="flex items-center justify-between gap-2 text-[11px] font-mono text-slate-400">
+          <span className="truncate">Watchlist Adapter</span>
+          <span className="text-cyan-400 shrink-0">Sandbox Demo</span>
         </div>
         <div className="pt-1.5 border-t border-slate-800 text-[10px] text-slate-400">
           SIH Problem: <span className="text-slate-400">SIH26188</span>

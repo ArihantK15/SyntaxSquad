@@ -273,7 +273,7 @@ export const ScreeningPage: React.FC<ScreeningPageProps> = ({ onScreeningComplet
                   value={tamperOption}
                   onChange={(e) => setTamperOption(e.target.value)}
                   disabled={generatingSpecimen || isProcessing}
-                  className="bg-slate-950 text-slate-200 px-2 py-1.5 text-xs font-mono focus:outline-none flex-1 border-r border-slate-800"
+                  className="bg-slate-950 text-slate-200 px-2 py-1.5 text-xs font-mono focus:outline-none flex-1 min-w-0 border-r border-slate-800"
                 >
                   <option value="photo_replaced">Photo Replacement</option>
                   <option value="mrz_tampered">MRZ Checksum Corruption</option>
@@ -288,7 +288,7 @@ export const ScreeningPage: React.FC<ScreeningPageProps> = ({ onScreeningComplet
                   type="button"
                   onClick={() => handleGenerateSpecimen(tamperOption)}
                   disabled={generatingSpecimen || isProcessing}
-                  className="px-3 py-1.5 bg-rose-950/60 hover:bg-rose-900/60 text-rose-300 text-xs font-mono font-semibold transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                  className="px-3 py-1.5 bg-rose-950/60 hover:bg-rose-900/60 text-rose-300 text-xs font-mono font-semibold transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50 shrink-0 whitespace-nowrap"
                   title="Generate Tampered Demo"
                 >
                   <Flame className="w-3.5 h-3.5 text-rose-400" />
