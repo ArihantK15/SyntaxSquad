@@ -176,6 +176,17 @@ export interface CaseDetail extends CaseItem {
   audit_logs: AuditLog[];
 }
 
+export interface PolicySettings {
+  weight_mrz: number;
+  weight_tamper: number;
+  weight_face: number;
+  weight_consistency: number;
+  weight_watchlist: number;
+  threshold_low: number;
+  threshold_medium: number;
+  threshold_high: number;
+}
+
 export interface DashboardStats {
   documents_screened: number;
   high_risk_cases: number;

@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
-import { Settings, Sliders, Shield, Database, Cpu, Check, Info } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Settings, Sliders, Shield, Database, Cpu, Check, Info, Loader2, AlertTriangle } from 'lucide-react';
+import { api } from '../services/api';
 
 export const SettingsPage: React.FC = () => {
   const [weights, setWeights] = useState({
@@ -16,15 +17,64 @@ export const SettingsPage: React.FC = () => {
     high: 74
   });
 
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleSave = (e: React.FormEvent) => {
+  useEffect(() => {
+    api.getPolicy()
+      .then((policy) => {
+        setWeights({
+          mrz: Math.round(policy.weight_mrz * 100),
+          tamper: Math.round(policy.weight_tamper * 100),
+          face: Math.round(policy.weight_face * 100),
+          consistency: Math.round(policy.weight_consistency * 100),
+          watchlist: Math.round(policy.weight_watchlist * 100)
+        });
+        setThresholds({
+          low: policy.threshold_low,
+          medium: policy.threshold_medium,
+          high: policy.threshold_high
+        });
+      })
+      .catch((err) => setError(err.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2500);
+    setError(null);
+    setSaving(true);
+    try {
+      await api.updatePolicy({
+        weight_mrz: weights.mrz / 100,
+        weight_tamper: weights.tamper / 100,
+        weight_face: weights.face / 100,
+        weight_consistency: weights.consistency / 100,
+        weight_watchlist: weights.watchlist / 100,
+        threshold_low: thresholds.low,
+        threshold_medium: thresholds.medium,
+        threshold_high: thresholds.high
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    } catch (err: any) {
+      setError(err.message || 'Failed to apply policy configuration');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const totalWeight = Object.values(weights).reduce((a, b) => a + b, 0);
+
+  if (loading) {
+    return (
+      <div className="p-12 text-center text-xs font-mono text-slate-400 flex items-center justify-center gap-2">
+        <Loader2 className="w-4 h-4 animate-spin" /> Loading live policy configuration...
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
@@ -202,15 +252,22 @@ export const SettingsPage: React.FC = () => {
 
         {/* Save Button */}
         <div className="flex items-center justify-end gap-3">
-          {saved && (
+          {error && (
+            <span className="text-xs font-mono text-rose-400 flex items-center gap-1">
+              <AlertTriangle className="w-3.5 h-3.5" /> {error}
+            </span>
+          )}
+          {saved && !error && (
             <span className="text-xs font-mono text-emerald-400 flex items-center gap-1">
-              <Check className="w-3.5 h-3.5" /> Policy weights updated
+              <Check className="w-3.5 h-3.5" /> Policy weights updated — takes effect on the next screening
             </span>
           )}
           <button
             type="submit"
-            className="px-6 py-2.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-mono font-bold tracking-wider uppercase transition-colors shadow-md shadow-cyan-950/40 cursor-pointer"
+            disabled={saving || totalWeight !== 100}
+            className="px-6 py-2.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-mono font-bold tracking-wider uppercase transition-colors shadow-md shadow-cyan-950/40 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
           >
+            {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
             Apply Policy Configuration
           </button>
         </div>

@@ -6,7 +6,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings
 from app.core.database import Base, engine, SessionLocal
-from app.api.routes import health, screening, cases, dashboard, demo, audit
+from app.api.routes import health, screening, cases, dashboard, demo, audit, settings as settings_routes
 
 from contextlib import asynccontextmanager
 
@@ -69,6 +69,7 @@ app.include_router(cases.router, prefix=settings.API_V1_STR)
 app.include_router(dashboard.router, prefix=settings.API_V1_STR)
 app.include_router(demo.router, prefix=settings.API_V1_STR)
 app.include_router(audit.router, prefix=settings.API_V1_STR)
+app.include_router(settings_routes.router, prefix=settings.API_V1_STR)
 
 if __name__ == "__main__":
     import uvicorn

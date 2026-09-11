@@ -5,7 +5,8 @@ import {
   RiskSignal,
   AuditLog,
   OfficerDecision,
-  ChainVerificationResult
+  ChainVerificationResult,
+  PolicySettings
 } from '../types';
 
 const API_BASE = '/api';
@@ -218,6 +219,25 @@ export const api = {
       body: JSON.stringify(params)
     });
     if (!res.ok) throw new Error('Failed to generate specimen document');
+    return res.json();
+  },
+
+  async getPolicy(): Promise<PolicySettings> {
+    const res = await fetch(`${API_BASE}/settings/policy`);
+    if (!res.ok) throw new Error('Failed to load policy settings');
+    return res.json();
+  },
+
+  async updatePolicy(policy: PolicySettings): Promise<PolicySettings> {
+    const res = await fetch(`${API_BASE}/settings/policy`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(policy)
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.detail || 'Failed to update policy settings');
+    }
     return res.json();
   }
 };

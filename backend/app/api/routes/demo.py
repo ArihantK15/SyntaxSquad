@@ -17,6 +17,7 @@ from app.services.tamper_service import get_tamper_service
 from app.services.face_service import get_face_service
 from app.services.watchlist_service import get_watchlist_provider
 from app.services.risk_engine import get_risk_engine
+from app.services.policy_service import get_policy
 from app.services.audit_service import AuditService
 from app.core.security import hash_identifier
 from app.core.demo_faces import PERSON_A, PERSON_B
@@ -205,7 +206,7 @@ def run_demo_scenario(scenario_key: str = Body(..., embed=True), db: Session = D
     watchlist_provider = get_watchlist_provider()
     watchlist_match = watchlist_provider.check_watchlist(full_name, cfg["doc_number"])
 
-    risk_engine = get_risk_engine()
+    risk_engine = get_risk_engine(get_policy(db))
     risk_res = risk_engine.calculate(
         mrz_data=mrz_data,
         validation_data=validation_data,

@@ -115,6 +115,66 @@ def test_watchlist_evasion_scenario_still_flags_near_miss():
     watchlist_factor = next(b for b in breakdown if b["factor"] == "Simulated Watchlist Adapter")
     assert watchlist_factor["raw_risk"] == 100.0
 
+def test_get_policy_settings_returns_defaults():
+    response = client.get("/api/settings/policy")
+    assert response.status_code == 200
+    data = response.json()
+    total = (data["weight_mrz"] + data["weight_tamper"] + data["weight_face"]
+             + data["weight_consistency"] + data["weight_watchlist"])
+    assert abs(total - 1.0) < 0.01
+
+def test_update_policy_rejects_weights_not_summing_to_100():
+    bad_policy = {
+        "weight_mrz": 0.5, "weight_tamper": 0.5, "weight_face": 0.5,
+        "weight_consistency": 0.1, "weight_watchlist": 0.05,
+        "threshold_low": 24, "threshold_medium": 49, "threshold_high": 74
+    }
+    response = client.post("/api/settings/policy", json=bad_policy)
+    assert response.status_code == 400
+    assert "100%" in response.json()["detail"]
+
+def test_update_policy_rejects_non_ascending_thresholds():
+    bad_policy = {
+        "weight_mrz": 0.25, "weight_tamper": 0.30, "weight_face": 0.30,
+        "weight_consistency": 0.10, "weight_watchlist": 0.05,
+        "threshold_low": 50, "threshold_medium": 30, "threshold_high": 74
+    }
+    response = client.post("/api/settings/policy", json=bad_policy)
+    assert response.status_code == 400
+
+def test_policy_change_actually_changes_a_real_screening_result():
+    """
+    This is the entire point of the fix: the Settings page's sliders used to
+    update local React state only -- "Apply Policy Configuration" was
+    entirely cosmetic and never reached the risk engine. Changing a weight
+    here must change a real demo scenario's computed risk breakdown.
+    """
+    # Push MRZ weight to its max and zero out everything else the
+    # "expired" scenario doesn't otherwise trigger, so the MRZ factor's
+    # contribution to the total score is unmistakable.
+    new_policy = {
+        "weight_mrz": 0.70, "weight_tamper": 0.10, "weight_face": 0.10,
+        "weight_consistency": 0.05, "weight_watchlist": 0.05,
+        "threshold_low": 24, "threshold_medium": 49, "threshold_high": 74
+    }
+    update_res = client.post("/api/settings/policy", json=new_policy)
+    assert update_res.status_code == 200
+    assert update_res.json()["weight_mrz"] == 0.70
+
+    demo_res = client.post("/api/demo/scenario", json={"scenario_key": "expired"})
+    assert demo_res.status_code == 200
+    detail = client.get(f"/api/cases/{demo_res.json()['case_id']}").json()
+    breakdown = detail["analyses"][0]["risk_breakdown"]
+    mrz_factor = next(b for b in breakdown if b["factor"] == "MRZ & Document Validation")
+    assert mrz_factor["weight"] == 0.70
+
+    # Restore defaults so later tests in this module aren't affected.
+    client.post("/api/settings/policy", json={
+        "weight_mrz": 0.25, "weight_tamper": 0.30, "weight_face": 0.30,
+        "weight_consistency": 0.10, "weight_watchlist": 0.05,
+        "threshold_low": 24, "threshold_medium": 49, "threshold_high": 74
+    })
+
 def test_officer_decision_recording():
     # Fetch first case
     cases_res = client.get("/api/cases?limit=1")

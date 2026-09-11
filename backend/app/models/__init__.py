@@ -86,3 +86,26 @@ class AuditLog(Base):
     entry_hash = Column(String(64), nullable=True)    # SHA-256 hash of current block
 
     case = relationship("Case", back_populates="audit_logs")
+
+
+class PolicySettings(Base):
+    """
+    Single-row table (id is always 1) holding the live-editable risk engine
+    policy -- the Settings page used to let an officer drag these same
+    weights/thresholds and click "Apply", but nothing was ever persisted or
+    read back by the risk engine. Defaults to app.core.config.settings'
+    static values the first time it's read; from then on, the risk engine
+    reads its weights and thresholds from here instead.
+    """
+    __tablename__ = "policy_settings"
+
+    id = Column(Integer, primary_key=True, default=1)
+    weight_mrz = Column(Float, nullable=False)
+    weight_tamper = Column(Float, nullable=False)
+    weight_face = Column(Float, nullable=False)
+    weight_consistency = Column(Float, nullable=False)
+    weight_watchlist = Column(Float, nullable=False)
+    threshold_low = Column(Float, nullable=False)
+    threshold_medium = Column(Float, nullable=False)
+    threshold_high = Column(Float, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

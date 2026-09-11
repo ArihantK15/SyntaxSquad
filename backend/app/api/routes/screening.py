@@ -16,6 +16,7 @@ from app.services.tamper_service import get_tamper_service
 from app.services.face_service import get_face_service
 from app.services.watchlist_service import get_watchlist_provider
 from app.services.risk_engine import get_risk_engine
+from app.services.policy_service import get_policy
 from app.services.audit_service import AuditService
 from app.core.demo_faces import PERSON_A
 
@@ -323,7 +324,7 @@ def process_risk_aggregation(case_id: str, db: Session = Depends(get_db)):
     watchlist_match = watchlist_provider.check_watchlist(full_name, doc_no)
 
     # 2. Risk Engine Evaluation
-    risk_engine = get_risk_engine()
+    risk_engine = get_risk_engine(get_policy(db))
     risk_res = risk_engine.calculate(
         mrz_data=analysis.mrz_result,
         validation_data=analysis.validation_result or {},

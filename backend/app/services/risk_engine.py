@@ -8,12 +8,21 @@ class RiskEngine:
     Outputs factor breakdown, individual risk signals, risk tier, and human-in-the-loop recommendations.
     """
 
-    def __init__(self):
-        self.w_mrz = settings.WEIGHT_MRZ
-        self.w_tamper = settings.WEIGHT_TAMPER
-        self.w_face = settings.WEIGHT_FACE
-        self.w_consistency = settings.WEIGHT_CONSISTENCY
-        self.w_watchlist = settings.WEIGHT_WATCHLIST
+    def __init__(self, policy=None):
+        """
+        `policy` is an optional PolicySettings row (see policy_service.py) --
+        the live, officer-editable weights/thresholds from the Settings page.
+        Falls back to the static app.core.config defaults when omitted (e.g.
+        existing tests that construct RiskEngine() directly).
+        """
+        self.w_mrz = policy.weight_mrz if policy else settings.WEIGHT_MRZ
+        self.w_tamper = policy.weight_tamper if policy else settings.WEIGHT_TAMPER
+        self.w_face = policy.weight_face if policy else settings.WEIGHT_FACE
+        self.w_consistency = policy.weight_consistency if policy else settings.WEIGHT_CONSISTENCY
+        self.w_watchlist = policy.weight_watchlist if policy else settings.WEIGHT_WATCHLIST
+        self.threshold_low = policy.threshold_low if policy else settings.THRESHOLD_LOW
+        self.threshold_medium = policy.threshold_medium if policy else settings.THRESHOLD_MEDIUM
+        self.threshold_high = policy.threshold_high if policy else settings.THRESHOLD_HIGH
 
     def calculate(
         self,
@@ -131,18 +140,18 @@ class RiskEngine:
         # for travel. Floor the score so it can never classify below HIGH when
         # any such signal is present.
         critical_floor_applied = False
-        if any(sig.get("severity") == "CRITICAL" for sig in all_signals) and total_risk <= settings.THRESHOLD_MEDIUM:
-            total_risk = settings.THRESHOLD_MEDIUM + 0.1
+        if any(sig.get("severity") == "CRITICAL" for sig in all_signals) and total_risk <= self.threshold_medium:
+            total_risk = self.threshold_medium + 0.1
             critical_floor_applied = True
 
         # Risk Tier Classification
-        if total_risk <= settings.THRESHOLD_LOW:
+        if total_risk <= self.threshold_low:
             risk_level = "LOW"
             recommendation = "CLEAR FOR ENTRY — Routine processing permitted"
-        elif total_risk <= settings.THRESHOLD_MEDIUM:
+        elif total_risk <= self.threshold_medium:
             risk_level = "MEDIUM"
             recommendation = "ROUTINE VERIFICATION — Officer visual confirmation recommended"
-        elif total_risk <= settings.THRESHOLD_HIGH:
+        elif total_risk <= self.threshold_high:
             risk_level = "HIGH"
             recommendation = "SECONDARY INSPECTION — Multiple document risk indicators detected"
         else:
@@ -196,5 +205,5 @@ class RiskEngine:
             "signals": all_signals
         }
 
-def get_risk_engine() -> RiskEngine:
-    return RiskEngine()
+def get_risk_engine(policy=None) -> RiskEngine:
+    return RiskEngine(policy=policy)
