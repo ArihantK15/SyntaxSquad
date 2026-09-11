@@ -36,7 +36,14 @@ class Settings(BaseSettings):
     
     # OCR Settings
     OCR_ENGINE: str = "pytesseract"
-    TESSERACT_PATH: str = "/opt/homebrew/bin/tesseract"
+    # Empty by default: ocr_service.py only overrides pytesseract's tesseract_cmd
+    # when this path actually exists, otherwise it falls back to pytesseract's
+    # own PATH search -- which is what works across machines/OSes as long as
+    # tesseract-ocr is installed. A hardcoded Homebrew-only default here
+    # (previously "/opt/homebrew/bin/tesseract") silently only worked on
+    # Apple Silicon Macs; set this explicitly if your tesseract binary isn't
+    # already on PATH.
+    TESSERACT_PATH: str = ""
     
     # Privacy & Disclaimer
     DISCLAIMER_TEXT: str = (

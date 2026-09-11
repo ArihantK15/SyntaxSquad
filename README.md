@@ -176,6 +176,24 @@ The first build downloads ~107MB of pretrained face-embedding weights (needs int
 
 ### Option B: Local Run (for active development)
 
+#### 0. Prerequisite: install Tesseract OCR
+
+Unlike Option A, this path doesn't run inside a container that already has
+`tesseract-ocr` installed -- you need it on your own machine, on your PATH:
+
+```bash
+# macOS
+brew install tesseract
+
+# Debian/Ubuntu
+sudo apt-get install tesseract-ocr
+
+# Windows
+# Install from https://github.com/UB-Mannheim/tesseract/wiki, then either add
+# its install directory to PATH or set TESSERACT_PATH in .env to the full
+# path of tesseract.exe.
+```
+
 #### 1. Backend Setup
 ```bash
 # In project root
