@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { CaseItem } from '../types';
 import { api } from '../services/api';
 import { RiskBadge } from '../components/RiskBadge';
+import { ScrollShadowX } from '../components/ScrollShadowX';
 import { Inbox, Search, Filter, ChevronRight, AlertTriangle, ShieldCheck } from 'lucide-react';
 
 interface ReviewQueuePageProps {
@@ -107,7 +108,7 @@ export const ReviewQueuePage: React.FC<ReviewQueuePageProps> = ({ onSelectCase }
             No screening cases in this queue view.
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <ScrollShadowX>
             <table className="w-full text-left text-xs font-mono">
               <thead className="bg-slate-950/80 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-800">
                 <tr>
@@ -160,7 +161,7 @@ export const ReviewQueuePage: React.FC<ReviewQueuePageProps> = ({ onSelectCase }
                 ))}
               </tbody>
             </table>
-          </div>
+          </ScrollShadowX>
         )}
       </div>
     </div>

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { DashboardStats, CaseItem } from '../types';
 import { api } from '../services/api';
 import { RiskBadge } from '../components/RiskBadge';
+import { ScrollShadowX } from '../components/ScrollShadowX';
 import {
   FileCheck2,
   AlertTriangle,
@@ -267,7 +268,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
           </button>
         </div>
 
-        <div className="overflow-x-auto">
+        <ScrollShadowX>
           <table className="w-full text-left text-xs font-mono">
             <thead className="bg-slate-950/80 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-800">
               <tr>
@@ -320,7 +321,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
               ))}
             </tbody>
           </table>
-        </div>
+        </ScrollShadowX>
       </div>
     </div>
   );

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { AuditLog, ChainVerificationResult } from '../types';
 import { api } from '../services/api';
+import { ScrollShadowX } from '../components/ScrollShadowX';
 import {
   ShieldCheck,
   ShieldAlert,
@@ -163,7 +164,7 @@ export const AuditTrailPage: React.FC<AuditTrailPageProps> = ({ onSelectCase }) 
         ) : filtered.length === 0 ? (
           <div className="p-12 text-center text-sm text-slate-500">No audit records match this search.</div>
         ) : (
-          <div className="overflow-x-auto">
+          <ScrollShadowX>
             <table className="w-full text-left text-sm">
               <thead className="text-slate-500 text-xs border-b border-slate-800/80">
                 <tr>
@@ -249,7 +250,7 @@ export const AuditTrailPage: React.FC<AuditTrailPageProps> = ({ onSelectCase }) 
                 })}
               </tbody>
             </table>
-          </div>
+          </ScrollShadowX>
         )}
       </div>
     </div>

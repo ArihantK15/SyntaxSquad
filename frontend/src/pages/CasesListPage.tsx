@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { CaseItem } from '../types';
 import { api } from '../services/api';
 import { RiskBadge } from '../components/RiskBadge';
+import { ScrollShadowX } from '../components/ScrollShadowX';
 import { FileText, Search, ChevronRight, RefreshCw } from 'lucide-react';
 
 interface CasesListPageProps {
@@ -108,7 +109,7 @@ export const CasesListPage: React.FC<CasesListPageProps> = ({ onSelectCase }) =>
             No cases match the query criteria.
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <ScrollShadowX>
             <table className="w-full text-left text-xs font-mono">
               <thead className="bg-slate-950/80 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-800">
                 <tr>
@@ -165,7 +166,7 @@ export const CasesListPage: React.FC<CasesListPageProps> = ({ onSelectCase }) =>
                 ))}
               </tbody>
             </table>
-          </div>
+          </ScrollShadowX>
         )}
       </div>
     </div>
