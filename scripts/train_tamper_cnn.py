@@ -23,11 +23,12 @@ never committed to this repo -- only the small trained checkpoint is.
 import os
 import sys
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.utils.data import TensorDataset, DataLoader, random_split
+from torch.utils.data import TensorDataset, DataLoader, random_split, WeightedRandomSampler
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
 
@@ -53,10 +54,34 @@ def to_tensor_dataset(patches: np.ndarray, labels: np.ndarray) -> TensorDataset:
     return TensorDataset(x, y)
 
 
+def _domain_val_accuracy(model, val_ds, domain: np.ndarray, which: int) -> Optional[float]:
+    """Validation accuracy restricted to one domain (0=our documents, 1=CASIA).
+    Kept separate from the combined metric because CASIA's sheer volume (see
+    DOMAIN note below) can swamp it -- a model can look accurate overall while
+    silently failing on the domain it will actually run against in production."""
+    idxs = [i for i in val_ds.indices if domain[i] == which]
+    if not idxs:
+        return None
+    xb = torch.stack([val_ds.dataset[i][0] for i in idxs])
+    yb = torch.stack([val_ds.dataset[i][1] for i in idxs])
+    model.eval()
+    with torch.no_grad():
+        preds = model(xb).argmax(dim=1)
+    return (preds == yb).float().mean().item()
+
+
 def main():
     print("Generating training data (synthetic splice patches)...")
-    patches, labels = generate_dataset(n_docs=80, patches_per_doc=8)
+    # n_docs raised from 80 -> 300 (patches_per_doc unchanged): with CASIA
+    # blended in, the document domain was only ~1600 patches (a ~320-sample
+    # validation slice), too small to measure doc-domain accuracy reliably --
+    # bumping document-domain volume stabilizes both training signal and the
+    # per-domain validation metric introduced above.
+    patches, labels = generate_dataset(n_docs=300, patches_per_doc=8)
     print(f"  {len(patches)} patches: {int((labels==0).sum())} authentic, {int((labels==1).sum())} tampered")
+    # DOMAIN 0 = our own travel-document generator (what TamperDetectionService
+    # actually sees in production); DOMAIN 1 = CASIA's natural photographs.
+    domain = np.zeros(len(patches), dtype=np.int64)
 
     if CASIA2_DIR and Path(CASIA2_DIR).is_dir():
         print(f"\nBlending in real splice data from {CASIA2_DIR} (using all available images) ...")
@@ -65,14 +90,29 @@ def main():
               f"{int((casia_labels==0).sum())} authentic, {int((casia_labels==1).sum())} tampered")
         patches = np.concatenate([patches, casia_patches], axis=0)
         labels = np.concatenate([labels, casia_labels], axis=0)
-        print(f"  combined total: {len(patches)} patches")
+        domain = np.concatenate([domain, np.ones(len(casia_patches), dtype=np.int64)])
+        print(f"  combined total: {len(patches)} patches "
+              f"({int((domain==0).sum())} document-domain, {int((domain==1).sum())} CASIA-domain)")
 
     dataset = to_tensor_dataset(patches, labels)
     n_val = int(len(dataset) * VAL_FRACTION)
     n_train = len(dataset) - n_val
     train_ds, val_ds = random_split(dataset, [n_train, n_val], generator=torch.Generator().manual_seed(42))
 
-    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True)
+    # CASIA's natural photos outnumber our document patches ~15:1 in this
+    # blend. A plain shuffled loader would let CASIA statistics dominate
+    # every batch, so the model mostly learns "natural photo" splice cues and
+    # barely learns what an authentic *document* patch looks like -- exactly
+    # what caused a genuine specimen to be confidently misflagged as tampered
+    # (see the tamper_cnn.pth retrain that fixed this bug). Reweight so both
+    # domains are drawn from with roughly equal probability per epoch,
+    # without discarding any CASIA data.
+    train_domain = domain[train_ds.indices]
+    domain_counts = np.bincount(train_domain, minlength=2)
+    per_sample_weight = 1.0 / domain_counts[train_domain]
+    sampler = WeightedRandomSampler(per_sample_weight, num_samples=n_train, replacement=True)
+
+    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, sampler=sampler)
     val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False)
 
     model = LightweightForensicCNN()
@@ -101,16 +141,25 @@ def main():
                 preds = model(xb).argmax(dim=1)
                 correct += (preds == yb).sum().item()
         val_acc = correct / max(1, n_val)
+        doc_acc = _domain_val_accuracy(model, val_ds, domain, which=0)
+        doc_acc_str = f"{doc_acc:.3%}" if doc_acc is not None else "n/a"
+
         marker = ""
-        if val_acc > best_val_acc:
-            best_val_acc = val_acc
+        # Model selection is driven by document-domain accuracy (falling back
+        # to the combined metric if there's no document-domain validation
+        # data) -- this is the metric that reflects real deployment
+        # performance, not overall accuracy dominated by CASIA volume.
+        selection_metric = doc_acc if doc_acc is not None else val_acc
+        if selection_metric > best_val_acc:
+            best_val_acc = selection_metric
             best_state = {k: v.clone() for k, v in model.state_dict().items()}
             marker = "  (best so far)"
-        print(f"  epoch {epoch:2d}/{EPOCHS}  train_loss={train_loss:.4f}  val_acc={val_acc:.3%}{marker}")
+        print(f"  epoch {epoch:2d}/{EPOCHS}  train_loss={train_loss:.4f}  "
+              f"val_acc={val_acc:.3%}  doc_domain_val_acc={doc_acc_str}{marker}")
 
     WEIGHTS_PATH.parent.mkdir(parents=True, exist_ok=True)
     torch.save(best_state, WEIGHTS_PATH)
-    print(f"\nBest validation accuracy: {best_val_acc:.3%}")
+    print(f"\nBest document-domain validation accuracy: {best_val_acc:.3%}")
     print(f"Saved best-epoch checkpoint to {WEIGHTS_PATH}")
     print("Restart the backend (or the docker container) to pick it up --")
     print("TamperDetectionService loads it automatically on startup.")
