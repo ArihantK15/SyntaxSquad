@@ -245,3 +245,57 @@ def test_biometrics_purge_protocol():
     assert cdata["analyses"][0]["biometrics_purged"] is True
     assert cdata["analyses"][0]["document_image_path"] == "[PURGED_PRIVACY_COMPLIANCE]"
 
+def test_cors_does_not_reflect_arbitrary_origins():
+    """
+    ALLOWED_ORIGINS previously included a bare "*" alongside explicit
+    origins, with allow_credentials=True on the CORS middleware. Starlette's
+    documented behavior in that combination is to reflect whatever Origin
+    header the request actually sent instead of a literal "*" -- verified
+    against the real running server with a fake origin before this was
+    fixed, which made the explicit allowlist meaningless. Locks in that an
+    arbitrary origin no longer gets echoed back.
+    """
+    response = client.get("/api/health", headers={"Origin": "http://evil.example.com"})
+    assert response.status_code == 200
+    assert response.headers.get("access-control-allow-origin") != "http://evil.example.com"
+
+def test_update_policy_service_rejects_bad_weights_even_bypassing_the_route():
+    """
+    The weights-sum-to-100% check used to live only in the API route, not in
+    update_policy() itself -- so any other future caller of the service
+    function would silently write an inconsistent policy row with no error.
+    Calling the service directly (bypassing the route's own validation
+    entirely) must still reject a bad payload and must not mutate the
+    stored policy.
+    """
+    from app.core.database import SessionLocal
+    from app.services.policy_service import get_policy, update_policy, PolicyValidationError
+
+    db = SessionLocal()
+    try:
+        before = get_policy(db)
+        before_weights = (
+            before.weight_mrz, before.weight_tamper, before.weight_face,
+            before.weight_consistency, before.weight_watchlist
+        )
+
+        with pytest.raises(PolicyValidationError):
+            update_policy(
+                db,
+                weight_mrz=0.9, weight_tamper=0.9, weight_face=0.9,
+                weight_consistency=0.1, weight_watchlist=0.05,
+                threshold_low=before.threshold_low,
+                threshold_medium=before.threshold_medium,
+                threshold_high=before.threshold_high,
+            )
+
+        db.rollback()
+        after = get_policy(db)
+        after_weights = (
+            after.weight_mrz, after.weight_tamper, after.weight_face,
+            after.weight_consistency, after.weight_watchlist
+        )
+        assert after_weights == before_weights
+    finally:
+        db.close()
+

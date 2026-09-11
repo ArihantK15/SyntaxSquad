@@ -20,7 +20,14 @@ class Settings(BaseSettings):
     
     # Security
     SECRET_KEY: str = "bordermesh-sih2026-demo-secret-key-change-in-production"
-    ALLOWED_ORIGINS: List[str] = ["http://localhost:5173", "http://127.0.0.1:5173", "*"]
+    # No wildcard here: FastAPI/Starlette combines allow_credentials=True with
+    # a "*" entry by reflecting whatever Origin header the request actually
+    # sent, rather than a literal "*" -- which makes this list into a no-op
+    # allowlist that accepts every origin with credentials attached. The
+    # deployed frontend never needs a third-party origin anyway: nginx proxies
+    # /api and /uploads under the same origin the page was loaded from, so
+    # this list only matters for local dev tooling hitting the API directly.
+    ALLOWED_ORIGINS: List[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
     
     # Risk Engine Weights (Sum to 1.0)
     WEIGHT_MRZ: float = 0.25

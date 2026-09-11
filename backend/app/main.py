@@ -48,11 +48,15 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS configuration
+# CORS configuration. allow_credentials is False because nothing in this
+# app uses cookies or session auth -- every request is a plain, credential-
+# free fetch -- and keeping it True alongside any future loosening of
+# ALLOWED_ORIGINS would silently re-open the origin-reflection issue this
+# was fixed for.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.ALLOWED_ORIGINS,
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

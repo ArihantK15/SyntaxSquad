@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel, ConfigDict
 
 from app.api.deps import get_db
-from app.services.policy_service import get_policy, update_policy
+from app.services.policy_service import get_policy, update_policy, PolicyValidationError
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -41,18 +41,10 @@ def get_policy_settings(db: Session = Depends(get_db)):
 
 @router.post("/policy", response_model=PolicyOut)
 def update_policy_settings(payload: PolicyUpdate, db: Session = Depends(get_db)):
-    total_weight = (
-        payload.weight_mrz + payload.weight_tamper + payload.weight_face
-        + payload.weight_consistency + payload.weight_watchlist
-    )
-    if abs(total_weight - 1.0) > 0.01:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Factor weights must sum to 100% (got {round(total_weight * 100, 1)}%)."
-        )
-    if not (0 <= payload.threshold_low < payload.threshold_medium < payload.threshold_high <= 100):
-        raise HTTPException(
-            status_code=400,
-            detail="Risk tier cutoffs must be strictly ascending and within 0-100."
-        )
-    return update_policy(db, **payload.model_dump())
+    # The weights-sum-to-100% / ascending-thresholds invariant is enforced
+    # inside update_policy itself (see policy_service.py) so it holds no
+    # matter what calls it -- this just translates that into an HTTP error.
+    try:
+        return update_policy(db, **payload.model_dump())
+    except PolicyValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
