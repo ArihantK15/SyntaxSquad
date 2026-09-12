@@ -95,6 +95,44 @@ class TamperForensics:
         return mean_error, gray_diff
 
     @staticmethod
+    def _detect_qr_boxes(gray: np.ndarray) -> List[tuple]:
+        """
+        Locates any QR code(s) in the image as (x1, y1, x2, y2) boxes.
+
+        A genuine QR code -- present by design on real government ID
+        formats like Aadhaar -- is, by construction, a small high-contrast
+        rectangular block of dense black/white noise: exactly the shape
+        `detect_splicing_boundaries` below is looking for (a bounded
+        rectangle with unusually high internal variance). Detecting it
+        explicitly, rather than trying to raise the variance/area
+        thresholds until a QR code no longer qualifies, avoids blinding the
+        check to an actual small pasted patch of similar size elsewhere on
+        the same document.
+        """
+        try:
+            retval, points = cv2.QRCodeDetector().detectMulti(gray)
+        except cv2.error:
+            return []
+        if not retval or points is None:
+            return []
+        boxes = []
+        for quad in points:
+            xs, ys = quad[:, 0], quad[:, 1]
+            boxes.append((float(xs.min()), float(ys.min()), float(xs.max()), float(ys.max())))
+        return boxes
+
+    @staticmethod
+    def _overlaps_a_qr_box(x: int, y: int, cw: int, ch: int, qr_boxes: List[tuple]) -> bool:
+        cand_area = cw * ch
+        for qx1, qy1, qx2, qy2 in qr_boxes:
+            ix1, iy1 = max(x, qx1), max(y, qy1)
+            ix2, iy2 = min(x + cw, qx2), min(y + ch, qy2)
+            overlap = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+            if cand_area > 0 and overlap / cand_area > 0.5:
+                return True
+        return False
+
+    @staticmethod
     def detect_splicing_boundaries(img_cv: np.ndarray) -> List[Dict[str, Any]]:
         """
         Detects sharp unnatural rectangular or irregular edge discontinuities characteristic
@@ -102,24 +140,27 @@ class TamperForensics:
         """
         h, w = img_cv.shape[:2]
         gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
-        
+        qr_boxes = TamperForensics._detect_qr_boxes(gray)
+
         # High-pass filter using Laplacian
         lap = cv2.Laplacian(gray, cv2.CV_64F)
         lap_abs = np.uint8(np.absolute(lap))
-        
+
         # Threshold high-frequency edges
         _, thresh = cv2.threshold(lap_abs, 45, 255, cv2.THRESH_BINARY)
         contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
+
         anomalies = []
         for cnt in contours:
             x, y, cw, ch = cv2.boundingRect(cnt)
             area = cw * ch
             # Look for suspicious patches (e.g. 50x20 to 300x150) with high perimeter-to-area ratio
             if 1500 < area < 70000 and cw > 35 and ch > 18:
+                if TamperForensics._overlaps_a_qr_box(x, y, cw, ch, qr_boxes):
+                    continue
                 roi = gray[y:y+ch, x:x+cw]
                 roi_var = float(np.var(roi))
-                
+
                 # Check variance deviation from image background
                 if roi_var > 1400:
                     anomalies.append({
