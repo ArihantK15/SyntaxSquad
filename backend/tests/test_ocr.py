@@ -181,6 +181,44 @@ def test_aadhaar_number_not_confused_with_enrolment_number():
     assert svc._extract_aadhaar_number(raw_text) == "123456789012"
 
 
+def test_aadhaar_number_survives_a_single_dropped_group_separator():
+    """
+    Reproduces a real failure observed by running an actual image through
+    live Tesseract (not just fabricated raw text): "1234 5678 9012" was
+    OCR'd as "12345678 9012" -- ONE of the two group spaces silently
+    dropped, the other preserved. The old regex required a mandatory single
+    space at BOTH boundaries and missed this mixed case entirely.
+    """
+    raw_text = "Government of India\n12345678 9012\n"
+    assert svc._extract_aadhaar_number(raw_text) == "123456789012"
+
+
+def test_aadhaar_number_survives_both_group_separators_dropped():
+    raw_text = "Government of India\n123456789012\n"
+    assert svc._extract_aadhaar_number(raw_text) == "123456789012"
+
+
+def test_aadhaar_full_name_survives_merged_header_words():
+    """
+    Reproduces a real failure observed by running an actual image through
+    live Tesseract: "Government of India" was OCR'd as "Governmentof India"
+    (space dropped between "Government" and "of"). The old exclusion list
+    checked for the whole phrase "GOVERNMENT OF INDIA" as one substring,
+    which no longer matched the merged word -- the boilerplate header line
+    was then mistaken for the holder's name.
+    """
+    raw_text = (
+        "Governmentof India\n"
+        "Unique Identification Authority of India\n"
+        "Ravi Kumar\n"
+        "DOB 15/08/1990\n"
+        "MALE\n"
+    )
+    lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
+    fields = svc.parse_aadhaar_fields(raw_text, lines)
+    assert fields["full_name"] == "Ravi Kumar"
+
+
 def test_aadhaar_fields_extract_dob_from_same_line_as_label():
     raw_text = (
         "Government of India\n"

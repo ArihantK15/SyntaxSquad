@@ -238,16 +238,18 @@ class TesseractOCRService(BaseOCRService):
         grouped as 4-4-4 with spaces -- distinct from the Enrolment Number
         (a slash-separated tracking ID also printed on the card, e.g.
         "4050/00286/01675") which must NOT be mistaken for the identity
-        number itself. Matching the spaced group form first, and only then
-        a bare run of 12 digits, avoids accidentally matching digits out of
-        the enrolment ID (which never appears as one contiguous run of 12).
+        number itself. The space between groups is treated as optional at
+        each boundary independently (`\s?`, not a mandatory `\s`) rather
+        than requiring the whole group to be either fully spaced or fully
+        bare -- observed live against real Tesseract output, which dropped
+        only ONE of the two group separators ("1234 5678 9012" ->
+        "12345678 9012"), a case a same-either-way regex misses. The `\s?`
+        gap still can't match the enrolment ID's "/" separators, so it
+        can't accidentally bridge digits out of that field.
         """
-        m = re.search(r'\b(\d{4}\s\d{4}\s\d{4})\b', raw_text)
+        m = re.search(r'(?<!\d)(\d{4}\s?\d{4}\s?\d{4})(?!\d)', raw_text)
         if m:
             return re.sub(r'\s', '', m.group(1))
-        m = re.search(r'(?<!\d)(\d{12})(?!\d)', raw_text)
-        if m:
-            return m.group(1)
         return None
 
     def parse_aadhaar_fields(self, raw_text: str, lines: List[str]) -> Dict[str, Any]:
@@ -302,8 +304,14 @@ class TesseractOCRService(BaseOCRService):
                 len(clean_l) > 4
                 and re.fullmatch(r"[A-Za-z.'\- ]+", clean_l)
                 and not re.search(r'\b(DOB|DATE OF BIRTH|MALE|FEMALE|TRANSGENDER)\b', clean_l, re.IGNORECASE)
+                # Individual words, not multi-word phrases: real Tesseract
+                # output on a live test dropped the space between
+                # "Government" and "of" ("Governmentof India"), which
+                # silently defeated a "GOVERNMENT OF INDIA" phrase-substring
+                # check while leaving "GOVERNMENT" itself intact as a
+                # substring of the merged word.
                 and not any(k in clean_l.upper() for k in [
-                    "GOVERNMENT OF INDIA", "UNIQUE IDENTIFICATION", "AUTHORITY",
+                    "GOVERNMENT", "UNIQUE", "IDENTIFICATION", "AUTHORITY",
                     "AADHAAR", "ENROLMENT", "UIDAI"
                 ])
             ):
