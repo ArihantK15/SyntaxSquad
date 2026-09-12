@@ -151,3 +151,80 @@ def test_nationality_extracted_from_labeled_line():
     lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
     fields = svc.parse_fields_from_text(raw_text, lines)
     assert fields["nationality"] == "ATL CITIZEN"
+
+
+def test_detect_document_type_recognizes_aadhaar_markers():
+    raw_text = "Government of India\nUnique Identification Authority of India\n"
+    assert TesseractOCRService._detect_document_type(raw_text) == "AADHAAR"
+
+
+def test_detect_document_type_defaults_to_passport():
+    raw_text = "PASSPORT REPUBLIC OF UTOPIA\nSURNAME / NOM\nKAUL\n"
+    assert TesseractOCRService._detect_document_type(raw_text) == "PASSPORT"
+
+
+def test_aadhaar_number_not_confused_with_enrolment_number():
+    """
+    Reproduces a real failure observed on an actual Aadhaar photo: the card
+    prints both a 12-digit Aadhaar (UID) number, conventionally grouped
+    4-4-4 with spaces, and an unrelated slash-separated Enrolment Number
+    ("4050/00286/01675") used only for tracking the original enrolment
+    application. A naive "any 12 digits" scan can accidentally assemble a
+    false positive from the enrolment ID's digits; the spaced-group pattern
+    must be preferred and matched first.
+    """
+    raw_text = (
+        "Government of India\n"
+        "Enrolment No.: 4050/00286/01675\n"
+        "1234 5678 9012\n"
+    )
+    assert svc._extract_aadhaar_number(raw_text) == "123456789012"
+
+
+def test_aadhaar_fields_extract_dob_from_same_line_as_label():
+    raw_text = (
+        "Government of India\n"
+        "RAVI KUMAR\n"
+        "DOB: 15/08/1990\n"
+        "MALE\n"
+        "1234 5678 9012\n"
+    )
+    lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
+    fields = svc.parse_aadhaar_fields(raw_text, lines)
+    assert fields["date_of_birth"] == "15/08/1990"
+    assert fields["sex"] == "M"
+    assert fields["document_number"] == "123456789012"
+    assert fields["nationality"] == "INDIA"
+    assert fields["date_of_expiry"] is None
+
+
+def test_aadhaar_full_name_excludes_institutional_boilerplate():
+    raw_text = (
+        "Government of India\n"
+        "Unique Identification Authority of India\n"
+        "RAVI KUMAR\n"
+        "DOB: 15/08/1990\n"
+        "MALE\n"
+    )
+    lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
+    fields = svc.parse_aadhaar_fields(raw_text, lines)
+    assert fields["full_name"] == "RAVI KUMAR"
+
+
+def test_extract_text_routes_to_aadhaar_parser_and_tags_document_type(monkeypatch):
+    aadhaar_raw = (
+        "Government of India\n"
+        "Unique Identification Authority of India\n"
+        "RAVI KUMAR\n"
+        "DOB: 15/08/1990\n"
+        "MALE\n"
+        "1234 5678 9012\n"
+    )
+    monkeypatch.setattr(svc, "preprocess_image", lambda path: None)
+    monkeypatch.setattr("pytesseract.image_to_data", lambda *a, **k: {"conf": []})
+    monkeypatch.setattr("pytesseract.image_to_string", lambda *a, **k: aadhaar_raw)
+
+    result = svc.extract_text("unused.jpg")
+    assert result["fields"]["document_type"] == "AADHAAR"
+    assert result["fields"]["full_name"] == "RAVI KUMAR"
+    assert result["fields"]["document_number"] == "123456789012"

@@ -46,12 +46,19 @@ export const OCRResults: React.FC<OCRResultsProps> = ({ data }) => {
           </h3>
         </div>
 
-        {/* Confidence Meter */}
         <div className="flex items-center gap-2">
-          <span className="text-[11px] font-mono text-slate-400">Confidence:</span>
-          <span className="text-xs font-mono font-bold text-slate-200 px-2 py-0.5 rounded bg-slate-800 border border-slate-700">
-            {confPercent}%
-          </span>
+          {data.fields.document_type && (
+            <span className="text-xs font-mono font-bold text-slate-300 px-2 py-0.5 rounded bg-slate-800 border border-slate-700">
+              {data.fields.document_type}
+            </span>
+          )}
+          {/* Confidence Meter */}
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-mono text-slate-400">Confidence:</span>
+            <span className="text-xs font-mono font-bold text-slate-200 px-2 py-0.5 rounded bg-slate-800 border border-slate-700">
+              {confPercent}%
+            </span>
+          </div>
         </div>
       </div>
 

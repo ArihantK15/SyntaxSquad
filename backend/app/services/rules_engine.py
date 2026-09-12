@@ -65,6 +65,20 @@ class DocumentRulesEngine:
                         "explanation": f"ICAO 9303 check digit verification failed for {field_name}. Potential character alteration.",
                         "score_impact": 18.0
                     })
+        elif fields.get("document_type") == "AADHAAR":
+            # Aadhaar is a national ID card, not an ICAO 9303 travel
+            # document -- it has no MRZ by design (a QR code carries its
+            # machine-readable data instead), so a missing MRZ here is
+            # expected, not a red flag. Penalizing it the same as a
+            # passport missing its MRZ would misclassify every genuine
+            # Aadhaar card as suspicious.
+            results.append({
+                "rule": "MRZ_PRESENCE",
+                "passed": True,
+                "severity": "LOW",
+                "explanation": "Not applicable — Aadhaar cards do not carry an ICAO Machine Readable Zone.",
+                "confidence": 0.95
+            })
         elif not mrz_data:
             results.append({
                 "rule": "MRZ_PRESENCE",

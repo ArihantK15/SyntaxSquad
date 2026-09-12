@@ -207,6 +207,111 @@ class TesseractOCRService(BaseOCRService):
             return None
         return f"{m.group(1).zfill(2)}/{m.group(2).zfill(2)}/{m.group(3)}"
 
+    # Markers that only appear on an Indian Aadhaar card, never on the
+    # project's ICAO-style bilingual passport specimens -- used to route
+    # extraction to the right label set rather than assuming one document
+    # type. Checked against the raw OCR blob (pre line-splitting) so a
+    # marker split across Tesseract's line breaks still matches.
+    AADHAAR_MARKERS = (
+        "AADHAAR", "UIDAI", "UNIQUE IDENTIFICATION AUTHORITY", "ENROLMENT"
+    )
+
+    @classmethod
+    def _detect_document_type(cls, raw_text: str) -> str:
+        """
+        Aadhaar cards carry none of the ICAO 9303 furniture (MRZ, French/
+        English bilingual field labels, passport-style document number) the
+        rest of this module's field parser is anchored on -- so field
+        extraction must know up front which label set applies. Defaults to
+        the existing passport-style path when no Aadhaar marker is found,
+        preserving current behavior for the project's own demo specimens.
+        """
+        upper = raw_text.upper()
+        if any(marker in upper for marker in cls.AADHAAR_MARKERS):
+            return "AADHAAR"
+        return "PASSPORT"
+
+    @staticmethod
+    def _extract_aadhaar_number(raw_text: str) -> Optional[str]:
+        """
+        The printed Aadhaar (UID) is always exactly 12 digits, conventionally
+        grouped as 4-4-4 with spaces -- distinct from the Enrolment Number
+        (a slash-separated tracking ID also printed on the card, e.g.
+        "4050/00286/01675") which must NOT be mistaken for the identity
+        number itself. Matching the spaced group form first, and only then
+        a bare run of 12 digits, avoids accidentally matching digits out of
+        the enrolment ID (which never appears as one contiguous run of 12).
+        """
+        m = re.search(r'\b(\d{4}\s\d{4}\s\d{4})\b', raw_text)
+        if m:
+            return re.sub(r'\s', '', m.group(1))
+        m = re.search(r'(?<!\d)(\d{12})(?!\d)', raw_text)
+        if m:
+            return m.group(1)
+        return None
+
+    def parse_aadhaar_fields(self, raw_text: str, lines: List[str]) -> Dict[str, Any]:
+        """
+        Extracts structured fields from an Aadhaar card. Unlike the
+        passport path's fixed label-above-value layout, Aadhaar printouts
+        vary in field placement, so each field uses whichever keyword
+        pattern is most reliable for it individually rather than one
+        uniform strategy.
+        """
+        fields: Dict[str, Any] = {
+            "full_name": None,
+            "document_number": None,
+            "nationality": "INDIA",
+            "country": "INDIA",
+            "date_of_birth": None,
+            "date_of_issue": None,
+            "date_of_expiry": None,  # Aadhaar has no expiry
+            "sex": None
+        }
+
+        fields["document_number"] = self._extract_aadhaar_number(raw_text)
+
+        # DOB is most often printed on the SAME line as its label
+        # ("DOB: 01/01/1990"), unlike the passport path's fixed
+        # label-above-value layout -- try the label's own line first, and
+        # only fall back to the line below it if that line has no date of
+        # its own (a label-only line, value printed underneath).
+        dob_label_pattern = r'\b(DOB|DATE OF BIRTH)\b'
+        dob_line = None
+        for i, line in enumerate(lines):
+            if re.search(dob_label_pattern, line, re.IGNORECASE):
+                dob_line = line if self._extract_date(line) else (
+                    lines[i + 1] if i + 1 < len(lines) else None
+                )
+                break
+        fields["date_of_birth"] = self._extract_date(dob_line)
+
+        gender_match = re.search(r'\b(MALE|FEMALE|TRANSGENDER)\b', raw_text, re.IGNORECASE)
+        if gender_match:
+            gender = gender_match.group(1).upper()
+            fields["sex"] = "M" if gender == "MALE" else ("F" if gender == "FEMALE" else "X")
+
+        # Name isn't behind a consistent label on Aadhaar printouts -- fall
+        # back to the same name-shaped-line heuristic as the passport path's
+        # fallback, extended with Aadhaar's own institutional boilerplate so
+        # header text ("Government of India", "Unique Identification
+        # Authority of India") isn't mistaken for the holder's name.
+        for line in lines[:10]:
+            clean_l = line.strip()
+            if (
+                len(clean_l) > 4
+                and re.fullmatch(r"[A-Za-z.'\- ]+", clean_l)
+                and not re.search(r'\b(DOB|DATE OF BIRTH|MALE|FEMALE|TRANSGENDER)\b', clean_l, re.IGNORECASE)
+                and not any(k in clean_l.upper() for k in [
+                    "GOVERNMENT OF INDIA", "UNIQUE IDENTIFICATION", "AUTHORITY",
+                    "AADHAAR", "ENROLMENT", "UIDAI"
+                ])
+            ):
+                fields["full_name"] = clean_l
+                break
+
+        return fields
+
     def parse_fields_from_text(self, raw_text: str, lines: List[str]) -> Dict[str, Any]:
         """Extracts structured document fields, anchored on each field's own label line."""
         fields: Dict[str, Any] = {
@@ -269,7 +374,12 @@ class TesseractOCRService(BaseOCRService):
             avg_conf = max(0.40, min(0.99, round(avg_conf, 2)))
 
             lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
-            fields = self.parse_fields_from_text(raw_text, lines)
+            document_type = self._detect_document_type(raw_text)
+            if document_type == "AADHAAR":
+                fields = self.parse_aadhaar_fields(raw_text, lines)
+            else:
+                fields = self.parse_fields_from_text(raw_text, lines)
+            fields["document_type"] = document_type
 
             return {
                 "raw_text": raw_text.strip(),
@@ -289,7 +399,8 @@ class TesseractOCRService(BaseOCRService):
                     "date_of_birth": None,
                     "date_of_issue": None,
                     "date_of_expiry": None,
-                    "sex": None
+                    "sex": None,
+                    "document_type": "PASSPORT"
                 },
                 "confidence": 0.50,
                 "detected_lines": []
@@ -308,7 +419,8 @@ class MockOCRService(BaseOCRService):
                 "date_of_birth": "01/01/2000",
                 "date_of_issue": "01/01/2020",
                 "date_of_expiry": "01/01/2030",
-                "sex": "M"
+                "sex": "M",
+                "document_type": "PASSPORT"
             },
             "confidence": 0.96,
             "detected_lines": [
