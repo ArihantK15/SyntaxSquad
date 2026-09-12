@@ -318,3 +318,71 @@ def test_face_result_reports_its_own_real_match_threshold():
     is_match = face_result["similarity"] >= face_result["match_threshold"]
     assert (face_result["status"] == "MATCH") == is_match
 
+def test_aadhaar_document_never_gets_a_fabricated_mrz(tmp_path):
+    """
+    Reproduces a real failure found by running an actual e-Aadhaar
+    screenshot through the live app: both MRZ scanners key off a generic
+    "long line containing '<'" shape heuristic, and a real Aadhaar page's
+    English disclaimer paragraph (or QR/signature block) garbled into text
+    that satisfied it -- producing a fabricated MRZ whose checksums then
+    "failed" against a genuine, unaltered card, flagging it as forged.
+
+    Exercises the actual /ocr and /validate routes (not just the service
+    functions directly), injecting a document whose OCR result claims to be
+    Aadhaar but whose raw lines are deliberately MRZ-shaped noise -- the
+    exact bug shape -- and asserts no MRZ data or MRZ signal ever surfaces.
+    """
+    from PIL import Image
+    from app.core.database import SessionLocal
+    from app.models import DocumentAnalysis
+
+    img_path = tmp_path / "aadhaar.jpg"
+    Image.new("RGB", (100, 100), "white").save(img_path)
+
+    upload_resp = client.post(
+        "/api/screening/upload",
+        files={"file": ("aadhaar.jpg", open(img_path, "rb"), "image/jpeg")},
+        data={"document_type": "Aadhaar", "country": "India"},
+    )
+    assert upload_resp.status_code == 200
+    case_id = upload_resp.json()["case_id"]
+
+    # Simulate the real failure directly: OCR correctly identified this as
+    # Aadhaar, but MRZ-shaped noise (mirroring the garbled disclaimer text
+    # observed live) is present in both the dedicated MRZ-band pass output
+    # and the general whole-document line list.
+    fake_mrz_line_1 = "BIRTHITSHOULDBEUSEDONLYWITHVERIF<ONLI"
+    fake_mrz_line_2 = "AUTHENTICATIONORSCANNINGOFQRCODEO<<<<"
+    db = SessionLocal()
+    try:
+        analysis = db.query(DocumentAnalysis).filter(DocumentAnalysis.case_id == case_id).first()
+        analysis.ocr_result = {
+            "raw_text": "Government of India\nRavi Kumar\n" + fake_mrz_line_1 + "\n" + fake_mrz_line_2,
+            "fields": {
+                "full_name": "Ravi Kumar",
+                "document_number": "123456789012",
+                "nationality": "INDIA",
+                "country": "INDIA",
+                "date_of_birth": "01/01/2000",
+                "date_of_issue": None,
+                "date_of_expiry": None,
+                "sex": "M",
+                "document_type": "AADHAAR",
+            },
+            "confidence": 0.9,
+            "detected_lines": ["Government of India", "Ravi Kumar", fake_mrz_line_1, fake_mrz_line_2],
+            "mrz_lines": [fake_mrz_line_1, fake_mrz_line_2],
+        }
+        db.commit()
+    finally:
+        db.close()
+
+    validate_resp = client.post(f"/api/screening/{case_id}/validate")
+    assert validate_resp.status_code == 200
+    body = validate_resp.json()
+    assert body["mrz_result"] is None
+    assert not any(
+        "MRZ" in s["signal"] or "Document Number Inconsistency" in s["signal"]
+        for s in body["validation_result"]["signals"]
+    )
+
