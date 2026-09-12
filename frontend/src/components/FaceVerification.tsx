@@ -87,7 +87,7 @@ export const FaceVerification: React.FC<FaceVerificationProps> = ({ faceResult }
         <div className="flex items-center justify-between text-xs font-mono">
           <span className="text-slate-400">Biometric Cosine Similarity:</span>
           <span className={`font-bold ${isMatch ? 'text-emerald-400' : 'text-rose-400'}`}>
-            {simPercent}% (Threshold: 70.0%)
+            {simPercent}% (Threshold: {(faceResult.match_threshold * 100).toFixed(1)}%)
           </span>
         </div>
 

@@ -121,6 +121,7 @@ class FaceVerificationOut(BaseModel):
     live_face_url: Optional[str] = None
     quality_checks: Dict[str, Any] = {}
     anti_spoofing_score: float = 0.95
+    match_threshold: float = 0.72
 
 
 # --- Full Risk Breakdown ---

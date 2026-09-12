@@ -103,6 +103,7 @@ export interface FaceVerificationResult {
   live_face_url?: string;
   quality_checks: Record<string, any>;
   anti_spoofing_score: number;
+  match_threshold: number;
   signals?: RiskSignal[];
 }
 

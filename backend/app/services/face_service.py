@@ -14,6 +14,13 @@ class BaseFaceService(ABC):
         pass
 
 class FaceVerificationService(BaseFaceService):
+    # Calibrated against the LFW face-verification benchmark (500 genuine +
+    # 500 impostor pairs) -- see scripts/calibrate_face_threshold.py. At 0.72:
+    # 98.0% accuracy, 0.60% false-accept rate, 3.40% false-reject rate.
+    # Returned in every result below so the UI displays this real number
+    # instead of a value someone has to remember to keep in sync by hand.
+    MATCH_THRESHOLD = 0.72
+
     def __init__(self):
         self.detector = FaceDetectorAndVerifier()
 
@@ -88,6 +95,7 @@ class FaceVerificationService(BaseFaceService):
                 "live_face_url": None,
                 "quality_checks": {"issue": "Could not detect clear face in document photo"},
                 "anti_spoofing_score": 0.5,
+                "match_threshold": self.MATCH_THRESHOLD,
                 "signals": [{
                     "module": "FACE",
                     "signal": "Document Portrait Undetected",
@@ -108,6 +116,7 @@ class FaceVerificationService(BaseFaceService):
                 "live_face_url": None,
                 "quality_checks": {"issue": "No face found in live capture"},
                 "anti_spoofing_score": 0.5,
+                "match_threshold": self.MATCH_THRESHOLD,
                 "signals": [{
                     "module": "FACE",
                     "signal": "Live Subject Face Not Detected",
@@ -126,6 +135,7 @@ class FaceVerificationService(BaseFaceService):
                 "live_face_url": None,
                 "quality_checks": {"multiple_faces_detected": len(live_faces)},
                 "anti_spoofing_score": 0.4,
+                "match_threshold": self.MATCH_THRESHOLD,
                 "signals": [{
                     "module": "FACE",
                     "signal": "Multiple Faces in Live Capture",
@@ -155,11 +165,7 @@ class FaceVerificationService(BaseFaceService):
         emb_live = self.detector.extract_embedding(live_crop_bgr)
         similarity = self.detector.compare_faces(emb_doc, emb_live)
 
-        # Threshold calibrated against the LFW face-verification benchmark (500
-        # genuine + 500 impostor pairs) -- see scripts/calibrate_face_threshold.py.
-        # At 0.72: 98.0% accuracy, 0.60% false-accept rate, 3.40% false-reject rate.
-        MATCH_THRESHOLD = 0.72
-        is_match = similarity >= MATCH_THRESHOLD
+        is_match = similarity >= self.MATCH_THRESHOLD
         status = "MATCH" if is_match else "REVIEW_REQUIRED"
 
         signals = []
@@ -169,7 +175,7 @@ class FaceVerificationService(BaseFaceService):
                 "signal": "Biometric Face Mismatch",
                 "severity": "HIGH",
                 "confidence": round(1.0 - similarity, 2),
-                "explanation": f"Live face biometric similarity score ({round(similarity*100, 1)}%) is below verification threshold ({MATCH_THRESHOLD*100:.0f}%). Manual identity review required.",
+                "explanation": f"Live face biometric similarity score ({round(similarity*100, 1)}%) is below verification threshold ({self.MATCH_THRESHOLD*100:.0f}%). Manual identity review required.",
                 "score_impact": 25.0
             })
         if quality.get("is_blurry") or quality.get("is_dark"):
@@ -189,6 +195,7 @@ class FaceVerificationService(BaseFaceService):
             "live_face_url": live_face_url,
             "quality_checks": quality,
             "anti_spoofing_score": quality.get("liveness_score", 0.95),
+            "match_threshold": self.MATCH_THRESHOLD,
             "signals": signals
         }
 

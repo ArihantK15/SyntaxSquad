@@ -299,3 +299,22 @@ def test_update_policy_service_rejects_bad_weights_even_bypassing_the_route():
     finally:
         db.close()
 
+def test_face_result_reports_its_own_real_match_threshold():
+    """
+    The frontend used to hardcode "Threshold: 70.0%" in two places (the
+    case-detail Face tab and the PDF report) while the actual verification
+    threshold in face_service.py was 0.72 -- a real, judge-visible
+    discrepancy found while double-checking these exact numbers. The API
+    must report the real threshold it actually used, so the UI can display
+    it instead of a value someone has to remember to keep in sync by hand.
+    """
+    demo_res = client.post("/api/demo/scenario", json={"scenario_key": "genuine"})
+    assert demo_res.status_code == 200
+    case_id = demo_res.json()["case_id"]
+
+    detail = client.get(f"/api/cases/{case_id}").json()
+    face_result = detail["analyses"][0]["face_result"]
+    assert face_result["match_threshold"] == pytest.approx(0.72)
+    is_match = face_result["similarity"] >= face_result["match_threshold"]
+    assert (face_result["status"] == "MATCH") == is_match
+

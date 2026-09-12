@@ -211,7 +211,7 @@ export const CaseReportPrintable: React.FC<CaseReportPrintableProps> = ({
             </div>
             {face && (
               <div style={{ marginTop: 8, fontSize: 11, textAlign: 'center', fontWeight: 700, color: face.status === 'MATCH' ? '#047857' : '#B91C1C' }}>
-                {Math.round(face.similarity * 100)}% Similarity (Threshold 70%)
+                {Math.round(face.similarity * 100)}% Similarity (Threshold {Math.round(face.match_threshold * 100)}%)
               </div>
             )}
           </div>
