@@ -57,6 +57,36 @@ def test_document_rules_mismatch():
     eval_res = DocumentRulesEngine.evaluate(ocr_data, mrz_data)
     assert any("Document Number Inconsistency" in s["signal"] for s in eval_res["signals"])
 
+def test_sex_code_valid():
+    ocr_data = {"fields": {"document_number": "X1234567"}}
+    mrz_data = {
+        "document_number": "X1234567",
+        "nationality": "UTO",
+        "birth_date": "000101",
+        "expiry_date": "300101",
+        "sex": "M",
+        "checksums": []
+    }
+    eval_res = DocumentRulesEngine.evaluate(ocr_data, mrz_data)
+    sex_rule = [r for r in eval_res["rules_detail"] if r["rule"] == "SEX_CODE_FORMAT"][0]
+    assert sex_rule["passed"] is True
+    assert not any(s["signal"] == "Malformed Sex/Gender Code" for s in eval_res["signals"])
+
+def test_sex_code_invalid():
+    ocr_data = {"fields": {"document_number": "X1234567"}}
+    mrz_data = {
+        "document_number": "X1234567",
+        "nationality": "UTO",
+        "birth_date": "000101",
+        "expiry_date": "300101",
+        "sex": "1",
+        "checksums": []
+    }
+    eval_res = DocumentRulesEngine.evaluate(ocr_data, mrz_data)
+    sex_rule = [r for r in eval_res["rules_detail"] if r["rule"] == "SEX_CODE_FORMAT"][0]
+    assert sex_rule["passed"] is False
+    assert any(s["signal"] == "Malformed Sex/Gender Code" for s in eval_res["signals"])
+
 def test_document_number_crosscheck_survives_single_ocr_slip():
     """
     The visual-zone text and the MRZ line are two INDEPENDENT OCR passes over

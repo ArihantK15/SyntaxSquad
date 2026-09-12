@@ -270,6 +270,34 @@ class DocumentRulesEngine:
                     "score_impact": 8.0
                 })
 
+        # RULE 7: Sex/Gender Code Validation (ICAO 9303 — must be M, F, or X)
+        if mrz_data and mrz_data.get("sex"):
+            sex = mrz_data["sex"].upper()
+            if sex in ("M", "F", "X"):
+                results.append({
+                    "rule": "SEX_CODE_FORMAT",
+                    "passed": True,
+                    "severity": "LOW",
+                    "explanation": f"Valid ICAO sex/gender code: '{sex}'.",
+                    "confidence": 0.98
+                })
+            else:
+                results.append({
+                    "rule": "SEX_CODE_FORMAT",
+                    "passed": False,
+                    "severity": "MEDIUM",
+                    "explanation": f"Malformed sex/gender code in MRZ: '{sex}'. Expected M, F, or X.",
+                    "confidence": 0.90
+                })
+                signals.append({
+                    "module": "VALIDATION",
+                    "signal": "Malformed Sex/Gender Code",
+                    "severity": "MEDIUM",
+                    "confidence": 0.90,
+                    "explanation": f"MRZ sex/gender code '{sex}' violates ICAO 9303 format (expected M/F/X).",
+                    "score_impact": 6.0
+                })
+
         passed_count = sum(1 for r in results if r["passed"])
         failed_count = sum(1 for r in results if not r["passed"])
 
