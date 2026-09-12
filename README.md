@@ -129,7 +129,7 @@ border-mesh/
 │   │   ├── ml/                         # PyTorch CNN tamper classifier & Face Embedder
 │   │   ├── utils/                      # Synthetic passport generator & image processing
 │   │   └── api/routes/                 # REST endpoints (cases, screening, dashboard, demo, health)
-│   ├── tests/                          # 13 automated unit & integration tests (100% pass rate)
+│   ├── tests/                          # 77 automated unit & integration tests (100% pass rate)
 │   ├── requirements.txt
 │   └── Dockerfile
 ├── frontend/
@@ -248,11 +248,11 @@ To execute the automated unit and integration tests across MRZ checksum algorith
 PYTHONPATH=backend ./venv/bin/pytest backend/tests -v
 ```
 
-All 41 automated tests pass with 100% success rate across core logic, ML signals, and security APIs. `test_api.py` uses `TestClient` as a context manager so the app's startup lifespan (table creation + seeding) actually runs — a bare `TestClient(app)` silently skips it.
+All 77 automated tests pass with 100% success rate across core logic, ML signals, and security APIs. `test_api.py` uses `TestClient` as a context manager so the app's startup lifespan (table creation + seeding) actually runs — a bare `TestClient(app)` silently skips it.
 
 > **Platform note:** `test_api.py::test_demo_scenario_execution` asserts the "genuine" demo scenario scores LOW. The specimen image's exact pixels (and therefore the tamper CNN's score) depend on which font PIL falls back to for text rendering, which differs between macOS (Helvetica) and the Linux container (DejaVu, installed in `backend/Dockerfile`) -- this can occasionally push the score to the MEDIUM/LOW boundary locally on macOS even though it is reliably LOW in the actual deployment target. Docker is the authoritative environment for this test; run it there (`docker compose exec backend python3 -m pytest tests/test_api.py -v` from `backend/`) for a result that matches production.
 
-**API & integration** (`test_api.py`) — health, dashboard stats, case listing, demo scenario execution, officer decisions, SHA-256 blockchain ledger verification, GDPR Art. 17 biometric purge.
+**API & integration** (`test_api.py`) — health, dashboard stats, case listing, demo scenario execution, officer decisions, SHA-256 blockchain ledger verification, GDPR Art. 17 biometric purge, policy settings (weights/thresholds validated both at the API layer and, independently, inside the service function itself so a future caller can't bypass it), CORS configuration (an arbitrary origin must not be reflected back), and that the face-verification API reports the same match threshold it actually used to decide MATCH vs REVIEW_REQUIRED.
 
 **MRZ** (`test_mrz.py`) — 7-3-1 check digit algorithm, TD3 parsing, tamper detection, and the filler-run reconstruction fix that recovers correct checksums from under-counted OCR output.
 
@@ -302,15 +302,18 @@ The project is built specifically under the **Blockchain & Cybersecurity** theme
 
 ## 11. Performance Benchmarks
 
-| Operation | Measured Latency |
-| :--- | :---: |
-| Image Normalization & CLAHE | ~140 ms |
-| OCR Text & Field Extraction | ~520 ms |
-| MRZ Checksum Verification | ~90 ms |
-| Tamper AI (ELA Heatmap Generation) | ~820 ms |
-| Biometric Face Verification | ~480 ms |
-| Risk Score Aggregation | ~50 ms |
-| **Total Staged Pipeline** | **~2.10 seconds** *(Well within 5.0s SIH target)* |
+Every case's audit trail timestamps each pipeline step, so these numbers are computed from real `AuditLog` deltas across actually-processed cases (`GET /api/dashboard/stats`, `latency_breakdown` — see `backend/app/api/routes/dashboard.py`), not hardcoded estimates. They'll shift slightly as more cases run; this is a representative snapshot, reproducible by hitting that endpoint yourself.
+
+| Operation | Measured Latency | Samples |
+| :--- | :---: | :---: |
+| OCR Text & Field Extraction | ~980 ms | n=109 |
+| MRZ Checksum Verification | ~165 ms | n=109 |
+| Tamper AI (ELA + CNN) | ~50 ms | n=109 |
+| Biometric Face Verification | ~550 ms | n=109 |
+| Risk Score Aggregation | ~11 ms | n=109 |
+| **Total Staged Pipeline (avg, wall-clock)** | **~2.0 seconds** *(Well within 5.0s SIH target)* | |
+
+The named-step sum (~1.76s) runs a bit under the measured wall-clock average (~2.0s) — the gap is real overhead outside any single named step (image I/O, database writes, network) that the per-module breakdown doesn't attribute to one module.
 
 ---
 
