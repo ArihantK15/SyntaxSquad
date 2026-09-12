@@ -124,3 +124,32 @@ def test_document_number_crosscheck_still_catches_real_mismatch():
     }
     eval_res = DocumentRulesEngine.evaluate(ocr_data, mrz_data)
     assert any("Document Number Inconsistency" in s["signal"] for s in eval_res["signals"])
+
+def test_aadhaar_document_not_penalized_for_missing_mrz():
+    """
+    Aadhaar cards are a national ID, not an ICAO 9303 travel document -- they
+    have no MRZ by design (a QR code carries the machine-readable payload
+    instead). Before document-type awareness, `evaluate()` flagged ANY
+    document with no MRZ as "Missing Machine Readable Zone" (HIGH severity),
+    which would misclassify every genuine Aadhaar card as suspicious.
+    """
+    ocr_data = {
+        "fields": {
+            "full_name": "RAVI KUMAR",
+            "document_number": "123456789012",
+            "nationality": "INDIA",
+            "country": "INDIA",
+            "document_type": "AADHAAR"
+        }
+    }
+    eval_res = DocumentRulesEngine.evaluate(ocr_data, None)
+    assert not any(s["signal"] == "Missing Machine Readable Zone" for s in eval_res["signals"])
+    mrz_rule = [r for r in eval_res["rules_detail"] if r["rule"] == "MRZ_PRESENCE"][0]
+    assert mrz_rule["passed"] is True
+
+def test_passport_without_mrz_still_flagged():
+    """Non-Aadhaar documents missing an MRZ must still be flagged -- the
+    Aadhaar exemption must not silently apply to every document type."""
+    ocr_data = {"fields": {"full_name": "JOHN DOE", "document_number": "A9999999"}}
+    eval_res = DocumentRulesEngine.evaluate(ocr_data, None)
+    assert any(s["signal"] == "Missing Machine Readable Zone" for s in eval_res["signals"])

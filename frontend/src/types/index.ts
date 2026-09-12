@@ -72,6 +72,7 @@ export interface OCRResult {
     date_of_issue?: string;
     date_of_expiry?: string;
     sex?: string;
+    document_type?: string;
   };
   confidence: number;
   detected_lines: string[];
