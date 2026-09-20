@@ -1,5 +1,88 @@
-from typing import Dict, Any, List, Optional
+from datetime import date
+from typing import Dict, Any, List, Optional, Tuple
 from app.core.config import settings
+from app.services.rules_engine import DocumentRulesEngine
+
+# Heuristic used to discount face-match confidence when the document photo
+# was very likely taken long enough ago (or the holder was a minor when it
+# was taken) that ordinary facial aging -- not tampering or a genuine
+# mismatch -- could plausibly account for a lower similarity score. The MRZ
+# only carries DOB and expiry (no issue date), so the document's issue date
+# is ESTIMATED from expiry minus the standard ICAO validity period for the
+# holder's age bracket. This is a transparent business rule, not a measured
+# calibration -- there is no ground-truth cross-age dataset behind these
+# thresholds yet (see scripts/finetune_face_embedder.py for that effort in
+# progress). Revisit these numbers once real accuracy data exists.
+ADULT_PASSPORT_VALIDITY_YEARS = 10
+MINOR_PASSPORT_VALIDITY_YEARS = 5
+MINOR_AGE_CUTOFF_YEARS = 18
+
+# Children's faces change disproportionately faster per year than adults'
+# (well-established in cross-age face-recognition research, e.g. the FG-NET
+# dataset this project is fine-tuning against) -- so a photo taken while the
+# holder was a minor is weighted as if the elapsed time were longer.
+MINOR_AT_ISSUE_GAP_MULTIPLIER = 1.6
+
+AGE_GAP_MODERATE_YEARS = 4.0
+AGE_GAP_HIGH_YEARS = 8.0
+FACE_WEIGHT_DISCOUNT_MODERATE = 0.75  # 25% weight reduction
+FACE_WEIGHT_DISCOUNT_HIGH = 0.50      # 50% weight reduction
+
+
+def _years_between(earlier: date, later: date) -> float:
+    return (later - earlier).days / 365.25
+
+
+def estimate_face_age_gap(mrz_data: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """
+    Estimates how long ago the document's photo was likely captured, using
+    only MRZ DOB + expiry (no issue date is machine-readable). Returns None
+    when there isn't enough valid MRZ date data to estimate anything --
+    callers must not penalize face-match confidence on missing/unparseable
+    dates, only on a genuine, computed large gap.
+    """
+    if not mrz_data:
+        return None
+    dob_date = DocumentRulesEngine.parse_yymmdd(mrz_data.get("birth_date", ""))
+    expiry_date = DocumentRulesEngine.parse_yymmdd(mrz_data.get("expiry_date", ""))
+    if not dob_date or not expiry_date:
+        return None
+
+    age_at_expiry_years = _years_between(dob_date, expiry_date)
+    validity_years = (
+        MINOR_PASSPORT_VALIDITY_YEARS if age_at_expiry_years < MINOR_AGE_CUTOFF_YEARS
+        else ADULT_PASSPORT_VALIDITY_YEARS
+    )
+    try:
+        estimated_issue_date = expiry_date.replace(year=expiry_date.year - validity_years)
+    except ValueError:
+        # Feb 29 on a non-leap estimated issue year.
+        estimated_issue_date = expiry_date.replace(year=expiry_date.year - validity_years, day=28)
+
+    photo_age_years = max(0.0, _years_between(estimated_issue_date, date.today()))
+    age_at_issue_years = _years_between(dob_date, estimated_issue_date)
+    was_minor_at_issue = age_at_issue_years < MINOR_AGE_CUTOFF_YEARS
+
+    effective_gap_years = photo_age_years * (
+        MINOR_AT_ISSUE_GAP_MULTIPLIER if was_minor_at_issue else 1.0
+    )
+
+    return {
+        "photo_age_years": round(photo_age_years, 1),
+        "effective_gap_years": round(effective_gap_years, 1),
+        "was_minor_at_issue": was_minor_at_issue,
+        "estimated_issue_date": estimated_issue_date,
+    }
+
+
+def face_weight_discount_for_gap(effective_gap_years: float) -> Tuple[float, Optional[str]]:
+    """Returns (multiplier, tier_label). tier_label is None when no discount applies."""
+    if effective_gap_years >= AGE_GAP_HIGH_YEARS:
+        return FACE_WEIGHT_DISCOUNT_HIGH, "HIGH"
+    if effective_gap_years >= AGE_GAP_MODERATE_YEARS:
+        return FACE_WEIGHT_DISCOUNT_MODERATE, "MODERATE"
+    return 1.0, None
+
 
 class RiskEngine:
     """
@@ -82,10 +165,11 @@ class RiskEngine:
         # --- 3. Face Verification Factor (30%) ---
         face_raw_risk = 0.0
         face_signals_list = []
+        face_weight = self.w_face
         if face_data:
             similarity = face_data.get("similarity", 1.0)
             status = face_data.get("status", "MATCH")
-            
+
             if status == "MATCH":
                 face_raw_risk = max(0.0, (1.0 - similarity) * 40.0)
             elif status == "REVIEW_REQUIRED":
@@ -96,12 +180,45 @@ class RiskEngine:
             for sig in face_data.get("signals", []):
                 all_signals.append(sig)
                 face_signals_list.append(sig["signal"])
+
+            # Discount the face module's weight when the MRZ DOB (combined
+            # with expiry, since issue date isn't machine-readable) implies
+            # the document photo is likely old enough -- or was taken young
+            # enough -- that ordinary facial aging plausibly explains a
+            # lower similarity score, distinct from tampering or a genuine
+            # identity mismatch. Only ever discounts risk (never amplifies
+            # it) and only fires on a REAL computed gap, never on missing
+            # MRZ data -- see estimate_face_age_gap's None-on-insufficient-
+            # data contract.
+            age_gap = estimate_face_age_gap(mrz_data)
+            if age_gap:
+                discount, tier = face_weight_discount_for_gap(age_gap["effective_gap_years"])
+                if tier:
+                    face_weight = round(self.w_face * discount, 4)
+                    minor_note = " (holder was a minor when the document was likely issued)" if age_gap["was_minor_at_issue"] else ""
+                    all_signals.append({
+                        "module": "FACE",
+                        "signal": f"Age-Gap-Adjusted Face Confidence ({tier})",
+                        "severity": "LOW",
+                        "confidence": 0.7,
+                        "explanation": (
+                            f"Face similarity lower-confidence due to an estimated "
+                            f"{age_gap['photo_age_years']:.0f}-year gap since likely document "
+                            f"photo capture{minor_note}. Face verification's weight in the "
+                            f"composite risk score was reduced from {self.w_face:.2f} to "
+                            f"{face_weight:.2f} to avoid over-penalizing a plausible aging "
+                            f"effect rather than tampering or a genuine mismatch. Estimated "
+                            f"issue date is not authoritative -- derived from MRZ expiry minus "
+                            f"standard ICAO validity, since issue date isn't MRZ-readable."
+                        ),
+                        "score_impact": 0.0
+                    })
         else:
             # Face verification pending or not performed yet
             face_raw_risk = 15.0
 
         face_raw_risk = min(100.0, face_raw_risk)
-        face_contrib = round(face_raw_risk * self.w_face, 1)
+        face_contrib = round(face_raw_risk * face_weight, 1)
 
         # --- 4. Consistency Checks (10%) ---
         consistency_raw_risk = 0.0
@@ -175,7 +292,7 @@ class RiskEngine:
             },
             {
                 "factor": "Biometric Face Verification",
-                "weight": self.w_face,
+                "weight": face_weight,
                 "raw_risk": round(face_raw_risk, 1),
                 "weighted_contribution": face_contrib,
                 "top_signals": face_signals_list[:2]

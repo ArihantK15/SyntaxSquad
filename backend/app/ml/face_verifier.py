@@ -1,3 +1,4 @@
+import os
 import cv2
 import numpy as np
 import torch
@@ -29,6 +30,18 @@ class FaceDetectorAndVerifier:
         self.device = torch.device("cpu")
         self.mtcnn = MTCNN(keep_all=True, device=self.device, post_process=False)
         self.embedder = InceptionResnetV1(pretrained="vggface2").eval().to(self.device)
+
+        # Interim FG-NET-only fine-tune (block8 + last_linear + last_bn unfrozen,
+        # see scripts/finetune_face_embedder.py) for better cross-age matching.
+        # This is a sanity-check checkpoint trained on FG-NET alone (82
+        # identities) -- NOT the intended FG-NET+YLFW combined fine-tune, which
+        # is still pending YLFW-Dev-Train-Balanced access. Swap this out once
+        # that combined checkpoint exists.
+        finetuned_path = os.path.join(os.path.dirname(__file__), "weights", "face_embedder_finetuned.pth")
+        if os.path.exists(finetuned_path):
+            state_dict = torch.load(finetuned_path, map_location=self.device)
+            self.embedder.load_state_dict(state_dict)
+            self.embedder.eval()
 
     def detect_face(
         self,

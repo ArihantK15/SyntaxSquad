@@ -1,3 +1,4 @@
+from datetime import date
 from app.services.risk_engine import RiskEngine
 
 def test_risk_engine_low_risk():
@@ -125,3 +126,93 @@ def test_risk_engine_critical_tamper_verdict_floors_score():
 
     assert result["critical_floor_applied"] is True
     assert result["risk_level"] in ("HIGH", "CRITICAL")
+
+
+def _yymmdd(d: date) -> str:
+    return d.strftime("%y%m%d")
+
+
+def test_risk_engine_discounts_face_weight_for_large_age_gap():
+    """
+    A document that was very likely issued to the holder as a minor, long
+    enough ago that ordinary facial aging plausibly explains a mediocre
+    (but not clearly-mismatched) similarity score, should have its face
+    module weight discounted rather than penalized as if it were a same-age
+    photo -- see risk_engine.estimate_face_age_gap.
+    """
+    engine = RiskEngine()
+    today = date.today()
+    # DOB ~11 years ago, expiry ~1 year ago -> estimated 5-year-validity
+    # minor's passport, issued ~6 years ago while the holder was ~5 --
+    # a large, minor-at-issue gap.
+    mrz_data = {
+        "is_valid": True,
+        "birth_date": _yymmdd(today.replace(year=today.year - 11)),
+        "expiry_date": _yymmdd(today.replace(year=today.year - 1)),
+    }
+    validation_data = {"passed_count": 5, "failed_count": 0, "signals": []}
+    tamper_data = {"tamper_risk": 0.05, "signals": []}
+    face_data = {"similarity": 0.60, "status": "MATCH", "signals": []}
+
+    result = engine.calculate(
+        mrz_data=mrz_data,
+        validation_data=validation_data,
+        tamper_data=tamper_data,
+        face_data=face_data,
+        watchlist_match=None
+    )
+
+    face_entry = next(b for b in result["breakdown"] if b["factor"] == "Biometric Face Verification")
+    assert face_entry["weight"] < engine.w_face
+
+    age_gap_signals = [s for s in result["signals"] if s["module"] == "FACE" and "Age-Gap" in s["signal"]]
+    assert len(age_gap_signals) == 1
+    assert "gap since likely document" in age_gap_signals[0]["explanation"]
+    # Purely informational -- discounting the face weight already reduces
+    # its contribution, so the note itself must not ALSO add risk score.
+    assert age_gap_signals[0]["score_impact"] == 0.0
+
+
+def test_risk_engine_no_age_gap_discount_for_recent_adult_document():
+    """Regression guard: a normal, recently-issued adult document must not
+    trigger any face-weight discount or explanatory signal."""
+    engine = RiskEngine()
+    today = date.today()
+    mrz_data = {
+        "is_valid": True,
+        "birth_date": _yymmdd(today.replace(year=today.year - 40)),
+        "expiry_date": _yymmdd(today.replace(year=today.year + 9)),
+    }
+    validation_data = {"passed_count": 5, "failed_count": 0, "signals": []}
+    tamper_data = {"tamper_risk": 0.05, "signals": []}
+    face_data = {"similarity": 0.90, "status": "MATCH", "signals": []}
+
+    result = engine.calculate(
+        mrz_data=mrz_data,
+        validation_data=validation_data,
+        tamper_data=tamper_data,
+        face_data=face_data,
+        watchlist_match=None
+    )
+
+    face_entry = next(b for b in result["breakdown"] if b["factor"] == "Biometric Face Verification")
+    assert face_entry["weight"] == engine.w_face
+    assert not [s for s in result["signals"] if s["module"] == "FACE" and "Age-Gap" in s["signal"]]
+
+
+def test_risk_engine_missing_mrz_dates_never_discounts_face_weight():
+    """Regression guard: absent/unparseable MRZ dates (the common case in
+    existing tests and for documents with no MRZ) must never trigger a
+    discount -- only a genuinely computed gap may."""
+    engine = RiskEngine()
+    face_data = {"similarity": 0.90, "status": "MATCH", "signals": []}
+
+    result = engine.calculate(
+        mrz_data={"is_valid": True},  # no birth_date/expiry_date at all
+        validation_data={"passed_count": 5, "failed_count": 0, "signals": []},
+        tamper_data={"tamper_risk": 0.05, "signals": []},
+        face_data=face_data,
+        watchlist_match=None
+    )
+    face_entry = next(b for b in result["breakdown"] if b["factor"] == "Biometric Face Verification")
+    assert face_entry["weight"] == engine.w_face
