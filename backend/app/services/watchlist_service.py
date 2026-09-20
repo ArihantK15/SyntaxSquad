@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, List
 import re
 
-from app.utils.text_similarity import fuzzy_equal
+from app.utils.text_similarity import fuzzy_equal, fuzzy_name_match
 
 
 class WatchlistProvider(ABC):
@@ -78,7 +78,13 @@ class MockWatchlistProvider(WatchlistProvider):
                     "explanation": f"Document ID matched simulated test record {entry['watchlist_id']} ({entry['category']})."
                 }
 
-            if clean_name and (entry_name == clean_name or entry_name in clean_name or fuzzy_equal(entry_name, clean_name, self.FUZZY_MAX_DISTANCE, self.FUZZY_MIN_LENGTH)):
+            # Name matching uses phonetic (Soundex/Metaphone) + per-token edit
+            # distance -- see fuzzy_name_match -- rather than a whole-string
+            # comparison, because genuine name variants (transliteration,
+            # spelling variants like 'Mohammed'/'Muhammad') commonly differ
+            # by more than the single-OCR-slip edit-distance budget used for
+            # document numbers, and can differ in more than one token at once.
+            if clean_name and fuzzy_name_match(entry_name, clean_name):
                 return {
                     "matched": True,
                     "provider": self.LABEL,

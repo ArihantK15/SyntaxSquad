@@ -1,3 +1,9 @@
+import re
+from typing import List
+
+import jellyfish
+
+
 def levenshtein(a: str, b: str) -> int:
     """Small edit-distance helper for tolerating single-character OCR slips
     between two independently-read copies of the same short string (a
@@ -28,3 +34,62 @@ def fuzzy_equal(a: str, b: str, max_distance: int = 1, min_length: int = 6) -> b
     if len(a) < min_length or abs(len(a) - len(b)) > max_distance:
         return False
     return levenshtein(a, b) <= max_distance
+
+
+def _name_tokens(name: str) -> List[str]:
+    return [t for t in re.split(r'\s+', name.upper().strip()) if t]
+
+
+def phonetic_or_fuzzy_token_equal(a: str, b: str) -> bool:
+    """
+    True if two individual name tokens are plausibly the same identity token
+    -- either OCR noise (small edit distance) or a genuine phonetic /
+    transliteration variant (Soundex or Metaphone match), e.g. 'MOHAMMED' vs
+    'MUHAMMAD' or 'STEPHENSON' vs 'STEVENSON' (Levenshtein distance 2 --
+    outside a single-OCR-slip tolerance -- but identical under both Soundex
+    and Metaphone).
+
+    Checks BOTH Soundex and Metaphone rather than either alone, because they
+    fail in different, non-overlapping cases (verified empirically):
+    'KATHERINE'/'CATHERINE' only share a Metaphone code (Soundex keeps the
+    literal first letter, so K/C never collide), while 'SEAN'/'SHAWN' only
+    share a Soundex code (Metaphone's silent-H handling keeps them apart).
+    """
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    if len(a) >= 4 and len(b) >= 4 and abs(len(a) - len(b)) <= 1 and levenshtein(a, b) <= 1:
+        return True
+    # Phonetic codes on very short tokens (initials, 1-2 letter fragments)
+    # collide too easily to be meaningful, and a large length gap undermines
+    # the whole premise of "sounds the same" -- gate on both.
+    if len(a) >= 3 and len(b) >= 3 and abs(len(a) - len(b)) <= 3:
+        if jellyfish.soundex(a) == jellyfish.soundex(b):
+            return True
+        if jellyfish.metaphone(a) == jellyfish.metaphone(b):
+            return True
+    return False
+
+
+def fuzzy_name_match(entry_name: str, query_name: str) -> bool:
+    """
+    True if every token in entry_name (a watchlist record's stored name) has
+    a phonetically-or-fuzzily matching token somewhere in query_name (the
+    noisy OCR/MRZ-extracted name being screened), regardless of token order
+    or extra tokens in the query (e.g. a middle name).
+
+    Deliberately token-level rather than whole-string: a real name can vary
+    in two places at once (a transliterated given name AND surname), which a
+    single whole-string edit-distance budget would reject even though each
+    half is individually a legitimate one-edit or phonetic variant --
+    checking each token independently tolerates that.
+    """
+    entry_tokens = _name_tokens(entry_name)
+    query_tokens = _name_tokens(query_name)
+    if not entry_tokens or not query_tokens:
+        return False
+    return all(
+        any(phonetic_or_fuzzy_token_equal(et, qt) for qt in query_tokens)
+        for et in entry_tokens
+    )

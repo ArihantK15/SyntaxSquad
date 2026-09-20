@@ -50,3 +50,39 @@ def test_document_number_with_two_differences_does_not_match():
     provider = MockWatchlistProvider()
     result = provider.check_watchlist(full_name=None, document_number="P8B92l44")
     assert result is None
+
+
+def test_name_matches_multi_token_transliteration_variant():
+    """
+    Two independent one-edit spelling variants at once (a transliterated
+    given name AND surname) -- 'MARCUS VANCE' -> 'MARKUS VANSE'. The old
+    whole-string edit-distance check (budget 1 across the whole name) would
+    reject this since the combined distance is 2; per-token matching allows
+    each name part its own independent one-edit tolerance.
+    """
+    provider = MockWatchlistProvider()
+    result = provider.check_watchlist(full_name="MARKUS VANSE", document_number=None)
+    assert result is not None
+    assert result["entry"]["watchlist_id"] == "WL-SIM-2026-103"
+
+
+def test_name_matches_phonetic_variant_beyond_edit_distance():
+    """
+    A genuine phonetic/transliteration variant whose Levenshtein distance
+    (3) is far outside a single-OCR-slip tolerance, but which shares the
+    same Soundex AND Metaphone code as the watchlisted name -- 'MARCUS' vs
+    'MARKOOS' is a stand-in for real-world cases like 'Mohammed'/'Muhammad'
+    (also Soundex+Metaphone-identical despite distance 2).
+    """
+    provider = MockWatchlistProvider()
+    result = provider.check_watchlist(full_name="MARKOOS VANCE", document_number=None)
+    assert result is not None
+    assert result["entry"]["watchlist_id"] == "WL-SIM-2026-103"
+
+
+def test_name_matching_stays_narrow_for_unrelated_names():
+    """Regression guard: phonetic matching must not turn into a blanket
+    fuzzy match -- an unrelated name must still not match any entry."""
+    provider = MockWatchlistProvider()
+    result = provider.check_watchlist(full_name="JOHN SMITH", document_number=None)
+    assert result is None
