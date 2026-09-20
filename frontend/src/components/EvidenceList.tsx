@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { RiskSignal } from '../types';
-import { AlertCircle, Filter, ShieldAlert } from 'lucide-react';
+import { ShieldAlert } from 'lucide-react';
 import { RiskBadge } from './RiskBadge';
+import { SectionHeading } from './SectionHeading';
 
 interface EvidenceListProps {
   signals: RiskSignal[];
@@ -18,12 +19,11 @@ export const EvidenceList: React.FC<EvidenceListProps> = ({ signals }) => {
   return (
     <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 backdrop-blur space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
-        <div className="flex items-center gap-2">
-          <ShieldAlert className="w-4 h-4 text-slate-500" />
-          <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-200">
-            Forensic Evidence & Signals ({signals.length})
-          </h3>
-        </div>
+        <SectionHeading
+          level="h3"
+          title={`Forensic evidence & signals (${signals.length})`}
+          icon={<ShieldAlert className="w-4 h-4 text-slate-500" />}
+        />
 
         {/* Severity Filter Chips */}
         <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800 text-[11px] font-mono">

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { OCRResult } from '../types';
-import { FileText, CheckCircle, ChevronDown, ChevronUp, Copy, Check } from 'lucide-react';
+import { FileText, ChevronDown, ChevronUp, Copy, Check } from 'lucide-react';
+import { SectionHeading } from './SectionHeading';
 
 interface OCRResultsProps {
   data?: OCRResult;
@@ -38,29 +39,26 @@ export const OCRResults: React.FC<OCRResultsProps> = ({ data }) => {
 
   return (
     <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 backdrop-blur space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <FileText className="w-4 h-4 text-slate-500" />
-          <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-200">
-            Module 1: OCR Extraction
-          </h3>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {data.fields.document_type && (
-            <span className="text-xs font-mono font-bold text-slate-300 px-2 py-0.5 rounded bg-slate-800 border border-slate-700">
-              {data.fields.document_type}
-            </span>
-          )}
-          {/* Confidence Meter */}
+      <SectionHeading
+        level="h3"
+        title="OCR extraction"
+        icon={<FileText className="w-4 h-4 text-slate-500" />}
+        action={
           <div className="flex items-center gap-2">
-            <span className="text-[11px] font-mono text-slate-400">Confidence:</span>
-            <span className="text-xs font-mono font-bold text-slate-200 px-2 py-0.5 rounded bg-slate-800 border border-slate-700">
-              {confPercent}%
-            </span>
+            {data.fields.document_type && (
+              <span className="text-xs font-semibold text-slate-300 px-2 py-0.5 rounded bg-slate-800 border border-slate-700">
+                {data.fields.document_type}
+              </span>
+            )}
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-slate-500">Confidence:</span>
+              <span className="text-xs font-semibold text-slate-200 px-2 py-0.5 rounded bg-slate-800 border border-slate-700">
+                {confPercent}%
+              </span>
+            </div>
           </div>
-        </div>
-      </div>
+        }
+      />
 
       {/* Field Grid */}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">

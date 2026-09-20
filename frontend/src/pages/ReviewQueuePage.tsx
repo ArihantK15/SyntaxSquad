@@ -3,7 +3,8 @@ import { CaseItem } from '../types';
 import { api } from '../services/api';
 import { RiskBadge } from '../components/RiskBadge';
 import { ScrollShadowX } from '../components/ScrollShadowX';
-import { Inbox, Search, Filter, ChevronRight, AlertTriangle, ShieldCheck } from 'lucide-react';
+import { Inbox, Search, ChevronRight } from 'lucide-react';
+import { SectionHeading } from '../components/SectionHeading';
 
 interface ReviewQueuePageProps {
   onSelectCase: (caseId: string) => void;
@@ -51,15 +52,11 @@ export const ReviewQueuePage: React.FC<ReviewQueuePageProps> = ({ onSelectCase }
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold font-mono text-slate-100 tracking-wider flex items-center gap-2">
-            <Inbox className="w-6 h-6 text-cyan-400" />
-            OFFICER REVIEW QUEUE
-          </h1>
-          <p className="text-xs font-mono text-slate-400 mt-1">
-            Cases flagged by AI risk engine requiring human immigration officer review and disposition
-          </p>
-        </div>
+        <SectionHeading
+          title="Officer review queue"
+          description="Cases flagged by the AI risk engine requiring human review and disposition."
+          icon={<Inbox className="w-5 h-5 text-cyan-400" />}
+        />
 
         {/* Search Bar */}
         <div className="relative w-full sm:w-72">

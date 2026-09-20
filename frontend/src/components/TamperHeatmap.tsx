@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { TamperResult } from '../types';
 import { Layers, Eye, Flame, AlertOctagon, ScanSearch } from 'lucide-react';
 import { RiskBadge } from './RiskBadge';
+import { SectionHeading } from './SectionHeading';
 
 interface TamperHeatmapProps {
   originalImageUrl?: string;
@@ -27,21 +28,19 @@ export const TamperHeatmap: React.FC<TamperHeatmapProps> = ({
   return (
     <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 backdrop-blur space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <div className="flex items-center gap-2">
-          <Layers className="w-4 h-4 text-slate-500" />
-          <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-200">
-            Module 3: Tamper AI & Error Level Analysis (ELA)
-          </h3>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <RiskBadge level={tamperResult.risk_level} size="sm" />
-          <span className="text-xs font-mono font-bold text-slate-200 px-2 py-0.5 rounded bg-slate-800">
-            Risk: {tamperRiskPercent}%
-          </span>
-        </div>
-      </div>
+      <SectionHeading
+        level="h3"
+        title="Tamper AI & error level analysis"
+        icon={<Layers className="w-4 h-4 text-slate-500" />}
+        action={
+          <div className="flex items-center gap-2">
+            <RiskBadge level={tamperResult.risk_level} size="sm" />
+            <span className="text-xs font-semibold text-slate-200 px-2 py-0.5 rounded bg-slate-800">
+              Risk: {tamperRiskPercent}%
+            </span>
+          </div>
+        }
+      />
 
       {/* View Toggle Tabs */}
       <div className="flex items-center justify-between border-b border-slate-800 pb-2">
@@ -127,8 +126,8 @@ export const TamperHeatmap: React.FC<TamperHeatmapProps> = ({
 
       {/* Forensic Signal Breakdown */}
       <div>
-        <h4 className="text-[11px] font-mono text-slate-400 uppercase tracking-wider mb-2">
-          Forensic Multi-Signal Indicators ({tamperResult.signals.length} Detected)
+        <h4 className="text-xs font-medium text-slate-400 mb-2">
+          Forensic multi-signal indicators ({tamperResult.signals.length} detected)
         </h4>
 
         {tamperResult.signals.length === 0 ? (

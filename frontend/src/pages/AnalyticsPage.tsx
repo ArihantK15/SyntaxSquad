@@ -1,18 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { DashboardStats } from '../types';
 import { api } from '../services/api';
-import { BarChart3, Activity, Clock, ShieldCheck, Zap } from 'lucide-react';
+import { SectionHeading } from '../components/SectionHeading';
+import { BarChart3, Activity, ShieldCheck, Zap } from 'lucide-react';
 import {
   ResponsiveContainer,
   BarChart,
   Bar,
   XAxis,
   YAxis,
-  Tooltip,
-  PieChart,
-  Pie,
-  Cell,
-  Legend
+  Tooltip
 } from 'recharts';
 
 export const AnalyticsPage: React.FC = () => {
@@ -37,18 +34,11 @@ export const AnalyticsPage: React.FC = () => {
 
   if (loading || !stats) {
     return (
-      <div className="p-12 text-center text-xs font-mono text-slate-400">
+      <div className="p-12 text-center text-xs text-slate-500">
         Loading analytics engine...
       </div>
     );
   }
-
-  const pieData = [
-    { name: 'Low Risk', value: stats.risk_distribution.LOW || 0, color: '#10b981' },
-    { name: 'Medium Risk', value: stats.risk_distribution.MEDIUM || 0, color: '#f59e0b' },
-    { name: 'High Risk', value: stats.risk_distribution.HIGH || 0, color: '#f97316' },
-    { name: 'Critical Risk', value: stats.risk_distribution.CRITICAL || 0, color: '#f43f5e' },
-  ];
 
   const docTypeData = Object.entries(stats.document_types || {}).map(([k, v]) => ({
     type: k,
@@ -63,95 +53,86 @@ export const AnalyticsPage: React.FC = () => {
     time: entry.time_ms
   }));
 
+  const kpis = [
+    {
+      label: 'Average pipeline latency',
+      value: `${(stats.avg_processing_time_ms / 1000).toFixed(2)}s`,
+      color: 'text-cyan-300',
+      icon: Zap,
+      iconColor: 'text-cyan-400',
+      note: 'Target: under 5.0s'
+    },
+    {
+      label: 'Risk mitigation rate',
+      value: `${stats.documents_screened > 0 ? Math.round((stats.cleared_cases / stats.documents_screened) * 100) : 0}%`,
+      color: 'text-emerald-400',
+      icon: ShieldCheck,
+      iconColor: 'text-emerald-400',
+      note: 'Admitted without secondary inspection'
+    },
+    {
+      label: 'Anomaly detection yield',
+      value: `${stats.documents_screened > 0 ? Math.round(((stats.high_risk_cases + stats.critical_cases) / stats.documents_screened) * 100) : 0}%`,
+      color: 'text-orange-400',
+      icon: Activity,
+      iconColor: 'text-orange-400',
+      note: 'Cases escalated for manual inspection'
+    },
+  ];
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold font-mono text-slate-100 tracking-wider flex items-center gap-2">
-          <BarChart3 className="w-6 h-6 text-cyan-400" />
-          SYSTEM ANALYTICS & FORENSIC INTELLIGENCE
-        </h1>
-        <p className="text-xs font-mono text-slate-400 mt-1">
-          Deep-dive telemetry into AI module triggers, latency profiles, and border security distributions
-        </p>
+      <SectionHeading
+        title="Analytics"
+        description="Deep-dive telemetry into AI module triggers, latency profiles, and risk distributions."
+        icon={<BarChart3 className="w-5 h-5 text-cyan-400" />}
+      />
+
+      {/* KPI strip */}
+      <div className="rounded-xl bg-slate-900/80 border border-slate-800 backdrop-blur grid grid-cols-1 sm:grid-cols-3 divide-x-0 sm:divide-x divide-y sm:divide-y-0 divide-slate-800">
+        {kpis.map((kpi) => {
+          const Icon = kpi.icon;
+          return (
+            <div key={kpi.label} className="p-4">
+              <div className="flex items-center justify-between text-slate-500 mb-2">
+                <span className="text-xs">{kpi.label}</span>
+                <Icon className={`w-4 h-4 ${kpi.iconColor}`} />
+              </div>
+              <div className={`text-2xl font-bold ${kpi.color}`}>
+                {kpi.value}
+              </div>
+              <span className="text-xs text-slate-500 mt-1 block">{kpi.note}</span>
+            </div>
+          );
+        })}
       </div>
 
-      {/* KPI Row */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 backdrop-blur">
-          <div className="flex items-center justify-between text-slate-400 mb-2">
-            <span className="text-xs font-mono uppercase">Average Pipeline Latency</span>
-            <Zap className="w-4 h-4 text-cyan-400" />
-          </div>
-          <div className="text-2xl font-bold font-mono text-cyan-300">
-            {(stats.avg_processing_time_ms / 1000).toFixed(2)} seconds
-          </div>
-          <span className="text-[10px] text-emerald-400 font-mono mt-1 block">
-            Target: &lt; 5.0s (Sub-second GPU acceleration compatible)
-          </span>
-        </div>
-
-        <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 backdrop-blur">
-          <div className="flex items-center justify-between text-slate-400 mb-2">
-            <span className="text-xs font-mono uppercase">Risk Mitigation Rate</span>
-            <ShieldCheck className="w-4 h-4 text-emerald-400" />
-          </div>
-          <div className="text-2xl font-bold font-mono text-emerald-400">
-            {stats.documents_screened > 0
-              ? Math.round((stats.cleared_cases / stats.documents_screened) * 100)
-              : 0}
-            %
-          </div>
-          <span className="text-[10px] text-slate-400 font-mono mt-1 block">
-            Admitted without secondary inspection
-          </span>
-        </div>
-
-        <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 backdrop-blur">
-          <div className="flex items-center justify-between text-slate-400 mb-2">
-            <span className="text-xs font-mono uppercase">Anomaly Detection Yield</span>
-            <Activity className="w-4 h-4 text-orange-400" />
-          </div>
-          <div className="text-2xl font-bold font-mono text-orange-400">
-            {stats.documents_screened > 0
-              ? Math.round(((stats.high_risk_cases + stats.critical_cases) / stats.documents_screened) * 100)
-              : 0}
-            %
-          </div>
-          <span className="text-[10px] text-slate-400 font-mono mt-1 block">
-            Cases escalated for manual inspection
-          </span>
-        </div>
-      </div>
-
-      {/* Latency by Module & Document Breakdown */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 backdrop-blur">
-          <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-200 mb-4">
-            Component Processing Latency (Milliseconds)
-          </h3>
-          <div className="h-64">
+      {/* Latency by Module & Document Breakdown -- asymmetric: latency has
+          more rows, so it gets more room. */}
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+        <div className="lg:col-span-3 bg-slate-900/80 border border-slate-800 rounded-xl p-5 backdrop-blur">
+          <SectionHeading level="h3" title="Component processing latency" description="Milliseconds per pipeline module" />
+          <div className="h-64 mt-2">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={latencyBreakdown} layout="vertical">
-                <XAxis type="number" stroke="#64748b" fontSize={11} fontFamily="monospace" />
-                <YAxis type="category" dataKey="module" stroke="#94a3b8" fontSize={11} fontFamily="monospace" width={140} />
-                <Tooltip contentStyle={{ backgroundColor: '#020617', borderColor: '#1e293b', borderRadius: '8px', fontSize: '12px', fontFamily: 'monospace' }} />
+                <XAxis type="number" stroke="#64748b" fontSize={11} />
+                <YAxis type="category" dataKey="module" stroke="#94a3b8" fontSize={11} width={140} />
+                <Tooltip contentStyle={{ backgroundColor: '#020617', borderColor: '#1e293b', borderRadius: '8px', fontSize: '12px' }} />
                 <Bar dataKey="time" fill="#06b6d4" radius={[0, 4, 4, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
         </div>
 
-        <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 backdrop-blur">
-          <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-200 mb-4">
-            Document Types Screened
-          </h3>
-          <div className="h-64">
+        <div className="lg:col-span-2 bg-slate-900/80 border border-slate-800 rounded-xl p-5 backdrop-blur">
+          <SectionHeading level="h3" title="Document types screened" />
+          <div className="h-64 mt-2">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={docTypeData}>
-                <XAxis dataKey="type" stroke="#64748b" fontSize={11} fontFamily="monospace" />
-                <YAxis stroke="#94a3b8" fontSize={11} fontFamily="monospace" />
-                <Tooltip contentStyle={{ backgroundColor: '#020617', borderColor: '#1e293b', borderRadius: '8px', fontSize: '12px', fontFamily: 'monospace' }} />
-                <Bar dataKey="count" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                <XAxis dataKey="type" stroke="#64748b" fontSize={11} />
+                <YAxis stroke="#94a3b8" fontSize={11} />
+                <Tooltip contentStyle={{ backgroundColor: '#020617', borderColor: '#1e293b', borderRadius: '8px', fontSize: '12px' }} />
+                <Bar dataKey="count" fill="#0e7490" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>

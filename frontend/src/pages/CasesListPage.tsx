@@ -4,6 +4,7 @@ import { api } from '../services/api';
 import { RiskBadge } from '../components/RiskBadge';
 import { ScrollShadowX } from '../components/ScrollShadowX';
 import { FileText, Search, ChevronRight, RefreshCw } from 'lucide-react';
+import { SectionHeading } from '../components/SectionHeading';
 
 interface CasesListPageProps {
   onSelectCase: (caseId: string) => void;
@@ -49,15 +50,11 @@ export const CasesListPage: React.FC<CasesListPageProps> = ({ onSelectCase }) =>
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold font-mono text-slate-100 tracking-wider flex items-center gap-2">
-            <FileText className="w-6 h-6 text-cyan-400" />
-            CASES ARCHIVE & REPOSITORY
-          </h1>
-          <p className="text-xs font-mono text-slate-400 mt-1">
-            Complete database of screened travel documents and officer historical determinations
-          </p>
-        </div>
+        <SectionHeading
+          title="Cases archive"
+          description="Complete database of screened travel documents and officer determinations."
+          icon={<FileText className="w-5 h-5 text-cyan-400" />}
+        />
 
         <div className="flex items-center gap-3 w-full sm:w-auto">
           <div className="relative flex-1 sm:w-64">

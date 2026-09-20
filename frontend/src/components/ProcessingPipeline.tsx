@@ -1,5 +1,6 @@
 import React from 'react';
-import { CheckCircle2, Loader2, Circle, AlertCircle } from 'lucide-react';
+import { Check, Loader2, AlertCircle } from 'lucide-react';
+import { SectionHeading } from './SectionHeading';
 
 export interface PipelineStage {
   id: string;
@@ -14,79 +15,84 @@ interface ProcessingPipelineProps {
   title?: string;
 }
 
+/**
+ * Left-to-right step flow -- this literally is the document-screening
+ * pipeline (upload -> OCR -> MRZ -> tamper -> face -> risk -> case file),
+ * so it's shown as one, not as a stack of identical rows.
+ */
 export const ProcessingPipeline: React.FC<ProcessingPipelineProps> = ({
   stages,
-  title = 'AI Screening Pipeline'
+  title = 'Screening pipeline'
 }) => {
   return (
-    <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-5 shadow-lg backdrop-blur">
-      <div className="flex items-center justify-between pb-3 mb-4 border-b border-slate-800">
-        <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2">
-          <span className="h-2 w-2 rounded-full bg-cyan-400"></span>
-          {title}
-        </h3>
-        <span className="text-[11px] font-mono text-slate-400">
-          REAL-TIME MULTI-MODEL EXECUTION
-        </span>
-      </div>
+    <div>
+      <SectionHeading level="h3" title={title} />
 
-      <div className="space-y-3">
+      <div className="mt-4 flex flex-col sm:flex-row sm:items-start gap-0">
         {stages.map((st, index) => {
-          return (
-            <div
-              key={st.id}
-              className={`flex items-center justify-between p-2.5 rounded-lg border transition-all ${
-                st.status === 'running'
-                  ? 'bg-cyan-950/40 border-cyan-500/40 text-cyan-200'
-                  : st.status === 'completed'
-                  ? 'bg-slate-950/60 border-slate-800/80 text-slate-300'
-                  : st.status === 'error'
-                  ? 'bg-rose-950/40 border-rose-500/40 text-rose-200'
-                  : 'bg-slate-950/20 border-slate-900 text-slate-400'
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <div className="shrink-0">
-                  {st.status === 'completed' && (
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                  )}
-                  {st.status === 'running' && (
-                    <Loader2 className="w-4 h-4 text-cyan-400 animate-spin" />
-                  )}
-                  {st.status === 'error' && (
-                    <AlertCircle className="w-4 h-4 text-rose-400" />
-                  )}
-                  {st.status === 'pending' && (
-                    <Circle className="w-4 h-4 text-slate-400" />
-                  )}
-                </div>
+          const isLast = index === stages.length - 1;
+          const nodeColor =
+            st.status === 'completed'
+              ? 'bg-emerald-500 border-emerald-500 text-white'
+              : st.status === 'running'
+              ? 'bg-cyan-600 border-cyan-600 text-white'
+              : st.status === 'error'
+              ? 'bg-rose-600 border-rose-600 text-white'
+              : 'bg-slate-900 border-slate-700 text-slate-500';
 
-                <div>
-                  <div className="text-xs font-mono font-medium flex items-center gap-2">
-                    <span>{st.name}</span>
-                    {st.status === 'running' && (
-                      <span className="text-[10px] px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-300 animate-pulse font-mono">
-                        ANALYZING...
-                      </span>
+          return (
+            <div key={st.id} className="flex sm:flex-1 sm:flex-col items-start sm:items-center gap-3 sm:gap-2">
+              {/* Node + connecting line */}
+              <div className="flex sm:flex-col items-center gap-0 shrink-0 sm:w-full">
+                <div className="flex sm:flex-row items-center w-full">
+                  <div
+                    className={`w-7 h-7 rounded-full border flex items-center justify-center shrink-0 transition-colors ${nodeColor}`}
+                  >
+                    {st.status === 'completed' ? (
+                      <Check className="w-3.5 h-3.5" />
+                    ) : st.status === 'running' ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : st.status === 'error' ? (
+                      <AlertCircle className="w-3.5 h-3.5" />
+                    ) : (
+                      <span className="text-[11px] font-medium">{index + 1}</span>
                     )}
                   </div>
-                  {st.detail && (
-                    <p className="text-[11px] text-slate-400 mt-0.5">{st.detail}</p>
+                  {!isLast && (
+                    <div
+                      className={`hidden sm:block h-px flex-1 ${
+                        st.status === 'completed' ? 'bg-emerald-500/50' : 'bg-slate-800'
+                      }`}
+                    />
                   )}
                 </div>
               </div>
 
-              <div className="text-right font-mono text-xs">
-                {st.latencyMs !== undefined ? (
-                  <span className="text-slate-400">{Math.round(st.latencyMs)} ms</span>
-                ) : st.status === 'completed' ? (
-                  <span className="text-emerald-400">DONE</span>
-                ) : st.status === 'running' ? (
-                  <span className="text-cyan-400">ACTIVE</span>
-                ) : (
-                  <span className="text-slate-400">QUEUED</span>
+              {/* Label + detail */}
+              <div className="flex-1 sm:text-center min-w-0 pb-4 sm:pb-0">
+                <div className="flex items-center sm:justify-center gap-1.5">
+                  <span
+                    className={`text-xs font-medium ${
+                      st.status === 'pending' ? 'text-slate-500' : 'text-slate-200'
+                    }`}
+                  >
+                    {st.name}
+                  </span>
+                  {st.latencyMs !== undefined && (
+                    <span className="text-[11px] text-slate-500">{Math.round(st.latencyMs)}ms</span>
+                  )}
+                </div>
+                {st.detail && (
+                  <p className="text-xs text-slate-500 mt-0.5 sm:max-w-[10rem] sm:mx-auto" title={st.detail}>
+                    {st.detail}
+                  </p>
                 )}
               </div>
+
+              {/* Vertical connector for the mobile/stacked layout */}
+              {!isLast && (
+                <div className="sm:hidden w-px self-stretch bg-slate-800 ml-3.5" />
+              )}
             </div>
           );
         })}

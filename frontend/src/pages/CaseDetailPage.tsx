@@ -175,9 +175,11 @@ export const CaseDetailPage: React.FC<CaseDetailPageProps> = ({ caseId, onBack }
         onDeleted={onBack}
       />
 
-      {/* Top Intelligence Grid: Risk Score Gauge + Explainable Breakdown */}
+      {/* Top Intelligence Grid: Risk Score Gauge + Explainable Breakdown --
+          sized to content, not an even split: the gauge is a compact
+          summary, the breakdown is the detailed data. */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        <div className="lg:col-span-6">
+        <div className="lg:col-span-4">
           <RiskScore
             score={caseData.risk_score}
             level={caseData.risk_level}
@@ -185,7 +187,7 @@ export const CaseDetailPage: React.FC<CaseDetailPageProps> = ({ caseId, onBack }
           />
         </div>
 
-        <div className="lg:col-span-6">
+        <div className="lg:col-span-8">
           <RiskBreakdown
             breakdown={riskBreakdown}
             totalScore={caseData.risk_score}

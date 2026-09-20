@@ -147,11 +147,11 @@ export const CaseHeader: React.FC<CaseHeaderProps> = ({
       {/* Officer Determination Action Bar */}
       <form onSubmit={handleSubmit} className="p-4 rounded-xl bg-slate-950/70 border border-slate-800/80 space-y-3">
         <div className="flex items-center justify-between">
-          <span className="text-xs font-mono font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+          <span className="text-sm font-semibold text-slate-200 flex items-center gap-1.5">
             <Shield className="w-3.5 h-3.5 text-slate-500" />
-            Screening Officer Determination
+            Screening officer determination
           </span>
-          <span className="text-[11px] font-mono text-slate-400">
+          <span className="text-xs text-slate-500">
             Recorded by: OFFICER-DEMO-01
           </span>
         </div>

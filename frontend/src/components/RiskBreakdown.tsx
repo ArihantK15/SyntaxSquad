@@ -1,6 +1,7 @@
 import React from 'react';
 import { RiskFactorContribution } from '../types';
-import { Sliders, HelpCircle } from 'lucide-react';
+import { Sliders } from 'lucide-react';
+import { SectionHeading } from './SectionHeading';
 
 interface RiskBreakdownProps {
   breakdown: RiskFactorContribution[];
@@ -10,17 +11,16 @@ interface RiskBreakdownProps {
 export const RiskBreakdown: React.FC<RiskBreakdownProps> = ({ breakdown, totalScore }) => {
   return (
     <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 backdrop-blur space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Sliders className="w-4 h-4 text-slate-500" />
-          <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-200">
-            Explainable Risk Breakdown
-          </h3>
-        </div>
-        <span className="text-xs font-mono text-slate-400">
-          Total: <strong className="text-slate-100">{Math.round(totalScore)} / 100</strong>
-        </span>
-      </div>
+      <SectionHeading
+        level="h3"
+        title="Explainable risk breakdown"
+        icon={<Sliders className="w-4 h-4 text-slate-500" />}
+        action={
+          <span className="text-xs text-slate-400">
+            Total: <strong className="text-slate-100">{Math.round(totalScore)} / 100</strong>
+          </span>
+        }
+      />
 
       <div className="space-y-3">
         {breakdown.map((item, idx) => {

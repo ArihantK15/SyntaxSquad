@@ -1,6 +1,7 @@
 import React from 'react';
 import { AuditLog } from '../types';
 import { History, Shield, User, Bot, Clock, Link, Lock, FileKey } from 'lucide-react';
+import { SectionHeading } from './SectionHeading';
 
 interface AuditTimelineProps {
   logs: AuditLog[];
@@ -17,20 +18,17 @@ export const AuditTimeline: React.FC<AuditTimelineProps> = ({ logs }) => {
 
   return (
     <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 backdrop-blur space-y-4">
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <div className="flex items-center gap-2">
-          <History className="w-4 h-4 text-slate-500" />
-          <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-200">
-            Chain of Custody & Cryptographic Ledger ({logs.length} Blocks)
-          </h3>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
+      <SectionHeading
+        level="h3"
+        title={`Chain of custody & cryptographic ledger (${logs.length} blocks)`}
+        icon={<History className="w-4 h-4 text-slate-500" />}
+        action={
+          <span className="text-xs font-semibold px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
             <Lock className="w-3 h-3" />
-            SHA-256 CHAINED
+            SHA-256 chained
           </span>
-        </div>
-      </div>
+        }
+      />
 
       <div className="relative pl-6 border-l-2 border-slate-800 space-y-4">
         {logs.map((item, idx) => {

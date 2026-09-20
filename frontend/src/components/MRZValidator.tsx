@@ -1,6 +1,7 @@
 import React from 'react';
 import { MRZResult, ValidationResult } from '../types';
 import { Binary, CheckCircle2, XCircle, AlertTriangle } from 'lucide-react';
+import { SectionHeading } from './SectionHeading';
 
 interface MRZValidatorProps {
   mrz?: MRZResult;
@@ -11,11 +12,11 @@ export const MRZValidator: React.FC<MRZValidatorProps> = ({ mrz, validation }) =
   if (!mrz) {
     return (
       <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 backdrop-blur text-center">
-        <div className="flex items-center gap-2 mb-2 text-xs font-mono font-bold text-amber-400">
+        <div className="flex items-center gap-2 mb-2 text-sm font-semibold text-amber-400">
           <AlertTriangle className="w-4 h-4" />
-          <span>Module 2: MRZ Extraction</span>
+          <span>MRZ extraction</span>
         </div>
-        <p className="text-xs text-slate-400 font-mono">
+        <p className="text-xs text-slate-500">
           No Machine Readable Zone (MRZ) detected or parsed.
         </p>
       </div>
@@ -24,28 +25,26 @@ export const MRZValidator: React.FC<MRZValidatorProps> = ({ mrz, validation }) =
 
   return (
     <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 backdrop-blur space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Binary className="w-4 h-4 text-slate-500" />
-          <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-200">
-            Module 2: ICAO 9303 MRZ Validation
-          </h3>
-        </div>
-
-        <span
-          className={`text-xs font-mono font-bold px-2.5 py-0.5 rounded-full border ${
-            mrz.is_valid
-              ? 'bg-emerald-950/60 text-emerald-300 border-emerald-500/40'
-              : 'bg-rose-950/60 text-rose-300 border-rose-500/40'
-          }`}
-        >
-          {mrz.is_valid ? 'ALL CHECKSUMS VALID' : 'CHECKSUM MISMATCH'}
-        </span>
-      </div>
+      <SectionHeading
+        level="h3"
+        title="ICAO 9303 MRZ validation"
+        icon={<Binary className="w-4 h-4 text-slate-500" />}
+        action={
+          <span
+            className={`text-xs font-semibold px-2.5 py-0.5 rounded-full border ${
+              mrz.is_valid
+                ? 'bg-emerald-950/60 text-emerald-300 border-emerald-500/40'
+                : 'bg-rose-950/60 text-rose-300 border-rose-500/40'
+            }`}
+          >
+            {mrz.is_valid ? 'All checksums valid' : 'Checksum mismatch'}
+          </span>
+        }
+      />
 
       {/* Raw MRZ Lines Display */}
       <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-1">
-        <span className="text-[10px] font-mono text-slate-400 block mb-1 uppercase tracking-wider">
+        <span className="text-[10px] text-slate-400 block mb-1">
           Format: {mrz.format} (2 lines x 44 chars)
         </span>
         <div className="font-mono text-xs sm:text-sm tracking-widest text-slate-200 break-all select-all font-semibold">
@@ -58,8 +57,8 @@ export const MRZValidator: React.FC<MRZValidatorProps> = ({ mrz, validation }) =
 
       {/* Checksums Matrix */}
       <div>
-        <h4 className="text-[11px] font-mono text-slate-400 uppercase tracking-wider mb-2">
-          ICAO 9303 7-3-1 Checksum Matrix
+        <h4 className="text-xs font-medium text-slate-400 mb-2">
+          ICAO 9303 7-3-1 checksum matrix
         </h4>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">

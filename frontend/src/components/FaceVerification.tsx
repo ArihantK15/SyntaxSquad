@@ -2,6 +2,7 @@ import React from 'react';
 import { FaceVerificationResult } from '../types';
 import { UserCheck, UserX, ScanFace, CheckCircle2, AlertTriangle, Sparkles } from 'lucide-react';
 import { RiskBadge } from './RiskBadge';
+import { SectionHeading } from './SectionHeading';
 
 interface FaceVerificationProps {
   faceResult?: FaceVerificationResult;
@@ -23,21 +24,19 @@ export const FaceVerification: React.FC<FaceVerificationProps> = ({ faceResult }
   return (
     <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 backdrop-blur space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <div className="flex items-center gap-2">
-          <ScanFace className="w-4 h-4 text-slate-500" />
-          <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-200">
-            Module 4: Biometric Face Verification
-          </h3>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <RiskBadge status={faceResult.status} size="sm" />
-          <span className="text-xs font-mono font-bold text-slate-200 px-2 py-0.5 rounded bg-slate-800">
-            Similarity: {simPercent}%
-          </span>
-        </div>
-      </div>
+      <SectionHeading
+        level="h3"
+        title="Biometric face verification"
+        icon={<ScanFace className="w-4 h-4 text-slate-500" />}
+        action={
+          <div className="flex items-center gap-2">
+            <RiskBadge status={faceResult.status} size="sm" />
+            <span className="text-xs font-semibold text-slate-200 px-2 py-0.5 rounded bg-slate-800">
+              Similarity: {simPercent}%
+            </span>
+          </div>
+        }
+      />
 
       {/* Side-by-Side Face Comparison */}
       <div className="grid grid-cols-2 gap-4">
