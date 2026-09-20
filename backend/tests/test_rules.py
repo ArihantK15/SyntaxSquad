@@ -125,6 +125,33 @@ def test_document_number_crosscheck_still_catches_real_mismatch():
     eval_res = DocumentRulesEngine.evaluate(ocr_data, mrz_data)
     assert any("Document Number Inconsistency" in s["signal"] for s in eval_res["signals"])
 
+def test_document_number_crosscheck_rejects_a_trivially_short_ocr_reading():
+    """
+    Reproduces a real logic gap found while reviewing RULE 4's OCR-noise
+    tolerance: alongside the bounded fuzzy-edit check, it also allows
+    outright substring containment (`clean_ocr_no in clean_mrz_no`) with NO
+    length floor. A near-degenerate OCR reading of the document number
+    (e.g. a single surviving character out of a badly garbled read) is then
+    trivially "contained" in almost any longer MRZ document number,
+    regardless of how different the two actually are -- silently defeating
+    the exact cross-check this rule exists to run. A genuinely truncated-
+    but-real partial read (the case substring containment is meant to
+    tolerate) is always several characters long; a bare single character is
+    not a plausible partial read, it's a failed one, and must still be
+    flagged.
+    """
+    ocr_data = {"fields": {"document_number": "7"}}  # OCR essentially failed
+    mrz_data = {
+        "surname": "KAUL",
+        "document_number": "X1234567",  # happens to contain '7', but is a wholly different number
+        "nationality": "UTO",
+        "birth_date": "000101",
+        "expiry_date": "300101",
+        "checksums": []
+    }
+    eval_res = DocumentRulesEngine.evaluate(ocr_data, mrz_data)
+    assert any("Document Number Inconsistency" in s["signal"] for s in eval_res["signals"])
+
 def test_aadhaar_document_not_penalized_for_missing_mrz():
     """
     Aadhaar cards are a national ID, not an ICAO 9303 travel document -- they

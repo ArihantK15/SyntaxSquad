@@ -113,6 +113,71 @@ def test_composite_checksum_survives_ocr_digit_letter_confusion():
     assert result["is_valid"] is True
 
 
+def test_composite_checksum_survives_ocr_noise_in_optional_data_field():
+    """
+    Reproduces a real failure found against genuine MIDV-2020 Greek passport
+    scans (scripts/evaluate_mrz_on_midv2020.py): the optional-data field's
+    trailing character -- a literal '0' immediately before the composite
+    check digit -- was consistently OCR'd as the letter 'Q'. Every other
+    field (doc number, DOB, expiry, names) read perfectly and passed its own
+    checksum, but the composite was computed from optional_raw completely
+    un-normalized (unlike every other field feeding it), so this single
+    ordinary OCR slip alone dropped the composite pass rate for this
+    document type from a would-be ~100% to 14%. This is the same class of
+    bug as test_composite_checksum_survives_ocr_digit_letter_confusion above,
+    just in the field that fix accidentally skipped.
+
+    Note: this bug's first fix attempt over-corrected by blanket-normalizing
+    optional_raw for the composite calculation -- see
+    test_composite_checksum_tolerates_genuine_alphanumeric_optional_data
+    below for why that was reverted in favor of trying both interpretations.
+    """
+    line1 = "P<GRCPAPAGO<<GABRIEL<<<<<<<<<<<<<<<<<<<<<<<<"
+    doc_raw, dob_raw, exp_raw = "AK6995574", "870102", "230317"
+    doc_cd = MRZService.compute_check_digit(doc_raw)
+    dob_cd = MRZService.compute_check_digit(dob_raw)
+    exp_cd = MRZService.compute_check_digit(exp_raw)
+    opt_raw = "<" * 14 + "0"  # genuine trailing '0', not filler
+    comp_cd = MRZService.compute_check_digit(doc_raw + doc_cd + dob_raw + dob_cd + exp_raw + exp_cd + opt_raw)
+
+    # OCR misread the optional field's trailing '0' as the letter 'Q'.
+    ocr_opt_raw = "<" * 14 + "Q"
+    line2 = f"{doc_raw}{doc_cd}GRC{dob_raw}{dob_cd}M{exp_raw}{exp_cd}{ocr_opt_raw}{comp_cd}"
+
+    result = MRZService.parse_td3(line1, line2)
+    comp_cs = [cs for cs in result["checksums"] if "Composite" in cs["field"]][0]
+    assert comp_cs["valid"] is True
+    assert result["is_valid"] is True
+
+
+def test_composite_checksum_tolerates_genuine_alphanumeric_optional_data():
+    """
+    Regression guard for a real over-correction caught against genuine
+    MIDV-2020 Azerbaijani passport scans: an earlier fix for the Greek-
+    passport bug above blanket-normalized optional_raw (treating it as
+    strictly numeric, the same way DOB/expiry are). That broke 61/100
+    genuine, unmodified Azerbaijani ground-truth records, whose optional
+    field carries a real alphanumeric personal-ID code (e.g. "KEK2K556")
+    -- normalize_digits rewrote real letters (S->5, O->0, etc.) as if they
+    were OCR noise, corrupting the checksum on entirely valid documents.
+    ICAO 9303 does not mandate optional data be numeric, so this MUST keep
+    validating when the field is genuinely alphanumeric and untouched by OCR.
+    """
+    line1 = "P<AZEABDULLAYEV<<DIL<<<<<<<<<<<<<<<<<<<<<<<<"
+    doc_raw, dob_raw, exp_raw = "C19389564", "940814", "280815"
+    doc_cd = MRZService.compute_check_digit(doc_raw)
+    dob_cd = MRZService.compute_check_digit(dob_raw)
+    exp_cd = MRZService.compute_check_digit(exp_raw)
+    opt_raw = "KEK2K556<<<<<<<"  # genuine alphanumeric personal-ID code, padded to the 15-char field width
+    comp_cd = MRZService.compute_check_digit(doc_raw + doc_cd + dob_raw + dob_cd + exp_raw + exp_cd + opt_raw)
+    line2 = f"{doc_raw}{doc_cd}AZE{dob_raw}{dob_cd}M{exp_raw}{exp_cd}{opt_raw}{comp_cd}"
+
+    result = MRZService.parse_td3(line1, line2)
+    comp_cs = [cs for cs in result["checksums"] if "Composite" in cs["field"]][0]
+    assert comp_cs["valid"] is True
+    assert result["is_valid"] is True
+
+
 def test_nationality_survives_ocr_letter_digit_confusion():
     """
     Reproduces a real false positive found on a genuine generated specimen:
@@ -151,6 +216,37 @@ def test_country_survives_ocr_letter_digit_confusion():
 
     result = MRZService.parse_td3(line1, line2)
     assert result["country"] == "UTO"
+
+
+def test_garbled_sex_code_is_preserved_not_silently_defaulted_to_m():
+    """
+    Reproduces a real gap found while reviewing MRZ parsing against Rule 7
+    (SEX_CODE_FORMAT, backend/app/services/rules_engine.py, added
+    specifically to catch a malformed sex/gender code): parse_td3 replaced
+    ANY sex character that wasn't already M/F/X/'<' with a hardcoded 'M'
+    before returning it, so a genuine OCR misread (e.g. 'G' instead of 'M')
+    was silently rewritten into a valid code -- meaning Rule 7 could never
+    actually fire against real OCR'd data, only against a hand-built
+    mrz_data dict that bypasses the parser entirely (as the existing
+    test_sex_code_invalid in test_rules.py does). The parser must pass the
+    raw (uppercased) character through untouched -- other than mapping
+    literal '<' filler to 'X' (ICAO 9303's own "unspecified" code) -- so
+    downstream validation can see and flag it.
+    """
+    line1 = "P<UTOKAUL<<ARIHANT<<<<<<<<<<<<<<<<<<<<<<"
+    doc_raw, dob_raw, exp_raw = "X1234567<", "000101", "300101"
+    doc_cd = MRZService.compute_check_digit(doc_raw)
+    dob_cd = MRZService.compute_check_digit(dob_raw)
+    exp_cd = MRZService.compute_check_digit(exp_raw)
+    opt_raw = "<" * 15
+    comp_cd = MRZService.compute_check_digit(doc_raw + doc_cd + dob_raw + dob_cd + exp_raw + exp_cd + opt_raw)
+
+    # OCR misread the sex character 'M' as 'G' (visually plausible OCR slip,
+    # and definitely not a valid ICAO sex code).
+    line2 = f"{doc_raw}{doc_cd}UTO{dob_raw}{dob_cd}G{exp_raw}{exp_cd}{opt_raw}{comp_cd}"
+
+    result = MRZService.parse_td3(line1, line2)
+    assert result["sex"] == "G"
 
 
 def test_mrz_td1_parsing():

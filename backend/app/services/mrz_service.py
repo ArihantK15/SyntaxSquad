@@ -117,14 +117,19 @@ class MRZService:
         
         dob_raw = cls.normalize_digits(line2[13:19])
         dob_cd = cls.normalize_digits(line2[19])
-        
-        sex = line2[20].replace('<', 'X')
-        if sex not in ['M', 'F', 'X']:
-            sex = 'M'
-        
+
+        # A garbled sex character is preserved as-is (uppercased), not
+        # silently defaulted to 'M' -- defaulting it would make Rule 7
+        # (SEX_CODE_FORMAT, rules_engine.py -- added specifically to catch a
+        # malformed sex/gender code) permanently unable to detect one from
+        # real OCR'd data, since it would never see anything but a value
+        # already valid by construction. '<' filler is the one case ICAO
+        # 9303 itself defines as meaningful here: unspecified ('X').
+        sex = 'X' if line2[20] == '<' else line2[20].upper()
+
         expiry_raw = cls.normalize_digits(line2[21:27])
         expiry_cd = cls.normalize_digits(line2[27])
-        
+
         optional_raw = line2[28:43]
         optional_data = optional_raw.replace('<', '')
         
@@ -147,8 +152,38 @@ class MRZService:
         # ICAO character values), spuriously failing composite validation on
         # an entirely genuine document. doc_number_raw itself is intentionally
         # NOT normalized -- document numbers legitimately contain letters.
-        composite_data = doc_number_raw + doc_number_cd + dob_raw + dob_cd + expiry_raw + expiry_cd + optional_raw
-        calc_composite_cd = cls.compute_check_digit(composite_data)
+        #
+        # optional_data is NOT normalized the way dob_raw/expiry_raw are:
+        # unlike those, which ICAO 9303 mandates are strictly numeric,
+        # optional data is issuer-defined and genuinely varies -- confirmed
+        # against real MIDV-2020 scans, where Greek passports leave it blank
+        # filler (occasionally with one literal trailing digit) while
+        # Azerbaijani passports pack a real alphanumeric personal-ID code
+        # into it (e.g. "KEK2K556"). Blindly normalizing it as if it were
+        # numeric (an earlier version of this fix did exactly that) corrects
+        # Greece's OCR noise but corrupts Azerbaijan's genuine letters
+        # (S->5, O->0, etc.), breaking composite validation on entirely
+        # unmodified documents -- verified directly: it dropped 61/100
+        # genuine Azerbaijani ground-truth records from valid to invalid.
+        #
+        # Instead, try BOTH interpretations and accept either: this still
+        # tolerates the confirmed real OCR-noise case (Greece) without
+        # assuming every issuer's optional field is numeric. The tradeoff is
+        # a real one, not a free lunch -- accepting two candidate checksums
+        # instead of one roughly doubles the chance a genuinely corrupted
+        # composite coincidentally validates (~1/10 -> ~1/5 for a
+        # single-digit checksum) -- but the alternative (blanket normalize)
+        # was measurably worse: a strictly higher false-invalid rate on
+        # real, unmodified documents. Both individual field checksums
+        # (doc number, DOB, expiry) are UNCHANGED and still each single-
+        # candidate, so this tradeoff is scoped to the composite only.
+        composite_data_raw = doc_number_raw + doc_number_cd + dob_raw + dob_cd + expiry_raw + expiry_cd + optional_raw
+        composite_data_normalized = (
+            doc_number_raw + doc_number_cd + dob_raw + dob_cd + expiry_raw + expiry_cd
+            + cls.normalize_digits(optional_raw)
+        )
+        calc_composite_cd = cls.compute_check_digit(composite_data_raw)
+        calc_composite_cd_normalized = cls.compute_check_digit(composite_data_normalized)
 
         checksums = [
             {
@@ -177,7 +212,7 @@ class MRZService:
                 "value": "Composite Checksum Payload",
                 "check_digit": composite_cd,
                 "calculated_check_digit": calc_composite_cd,
-                "valid": composite_cd == calc_composite_cd
+                "valid": composite_cd in (calc_composite_cd, calc_composite_cd_normalized)
             }
         ]
 
@@ -224,9 +259,10 @@ class MRZService:
         dob_raw = cls.normalize_digits(line2[0:6])
         dob_cd = cls.normalize_digits(line2[6])
 
-        sex = line2[7].replace('<', 'X')
-        if sex not in ['M', 'F', 'X']:
-            sex = 'M'
+        # See parse_td3's comment: preserve a garbled sex character as-is
+        # rather than defaulting it to 'M', so Rule 7 (SEX_CODE_FORMAT) can
+        # actually see and flag it.
+        sex = 'X' if line2[7] == '<' else line2[7].upper()
 
         expiry_raw = cls.normalize_digits(line2[8:14])
         expiry_cd = cls.normalize_digits(line2[14])
@@ -251,12 +287,20 @@ class MRZService:
         # field values as the individual checksums above, for the same
         # reason as TD3's composite (see parse_td3): computing it from raw,
         # un-normalized slices would re-fail on ordinary OCR digit/letter
-        # noise the individual field checks already tolerate.
-        composite_data = (
+        # noise the individual field checks already tolerate. The optional
+        # spans use TD3's "try both raw and digit-normalized, accept either"
+        # approach (see parse_td3's comment) rather than blanket-normalizing
+        # them -- optional data is issuer-defined and not guaranteed numeric.
+        composite_data_raw = (
             doc_number_raw + doc_number_cd + optional1_raw
             + dob_raw + dob_cd + expiry_raw + expiry_cd + optional2_raw
         )
-        calc_composite_cd = cls.compute_check_digit(composite_data)
+        composite_data_normalized = (
+            doc_number_raw + doc_number_cd + cls.normalize_digits(optional1_raw)
+            + dob_raw + dob_cd + expiry_raw + expiry_cd + cls.normalize_digits(optional2_raw)
+        )
+        calc_composite_cd = cls.compute_check_digit(composite_data_raw)
+        calc_composite_cd_normalized = cls.compute_check_digit(composite_data_normalized)
 
         checksums = [
             {
@@ -285,7 +329,7 @@ class MRZService:
                 "value": "Composite Checksum Payload",
                 "check_digit": composite_cd,
                 "calculated_check_digit": calc_composite_cd,
-                "valid": composite_cd == calc_composite_cd
+                "valid": composite_cd in (calc_composite_cd, calc_composite_cd_normalized)
             }
         ]
         all_valid = all(cs["valid"] for cs in checksums)
@@ -337,9 +381,10 @@ class MRZService:
         dob_raw = cls.normalize_digits(line2[13:19])
         dob_cd = cls.normalize_digits(line2[19])
 
-        sex = line2[20].replace('<', 'X')
-        if sex not in ['M', 'F', 'X']:
-            sex = 'M'
+        # See parse_td3's comment: preserve a garbled sex character as-is
+        # rather than defaulting it to 'M', so Rule 7 (SEX_CODE_FORMAT) can
+        # actually see and flag it.
+        sex = 'X' if line2[20] == '<' else line2[20].upper()
 
         expiry_raw = cls.normalize_digits(line2[21:27])
         expiry_cd = cls.normalize_digits(line2[27])
@@ -353,8 +398,15 @@ class MRZService:
         calc_dob_cd = cls.compute_check_digit(dob_raw)
         calc_expiry_cd = cls.compute_check_digit(expiry_raw)
 
-        composite_data = doc_number_raw + doc_number_cd + dob_raw + dob_cd + expiry_raw + expiry_cd + optional_raw
-        calc_composite_cd = cls.compute_check_digit(composite_data)
+        # optional_data uses TD3's "try both raw and digit-normalized,
+        # accept either" approach -- see parse_td3's comment.
+        composite_data_raw = doc_number_raw + doc_number_cd + dob_raw + dob_cd + expiry_raw + expiry_cd + optional_raw
+        composite_data_normalized = (
+            doc_number_raw + doc_number_cd + dob_raw + dob_cd + expiry_raw + expiry_cd
+            + cls.normalize_digits(optional_raw)
+        )
+        calc_composite_cd = cls.compute_check_digit(composite_data_raw)
+        calc_composite_cd_normalized = cls.compute_check_digit(composite_data_normalized)
 
         checksums = [
             {
@@ -383,7 +435,7 @@ class MRZService:
                 "value": "Composite Checksum Payload",
                 "check_digit": composite_cd,
                 "calculated_check_digit": calc_composite_cd,
-                "valid": composite_cd == calc_composite_cd
+                "valid": composite_cd in (calc_composite_cd, calc_composite_cd_normalized)
             }
         ]
         all_valid = all(cs["valid"] for cs in checksums)

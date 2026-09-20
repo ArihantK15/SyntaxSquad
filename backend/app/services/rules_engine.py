@@ -190,13 +190,23 @@ class DocumentRulesEngine:
 
             # The visual zone and the MRZ line are two independent OCR passes
             # over the same physical number -- each can misread a different
-            # character. Tolerate a single-edit difference between them
-            # (bounded, length-gated) rather than flagging ordinary OCR noise
-            # as a document inconsistency.
+            # character, or one pass can genuinely truncate a few leading/
+            # trailing characters (a real partial read, not a failed one).
+            # Tolerate a single-edit difference (bounded, length-gated via
+            # fuzzy_equal) or outright substring containment -- but only
+            # when the SHORTER side is long enough to mean something: a
+            # near-degenerate OCR reading (e.g. one surviving character out
+            # of a badly garbled read) is trivially "contained" in almost
+            # any longer number regardless of how different they really
+            # are, which would silently defeat this exact cross-check.
+            MIN_SUBSTRING_MATCH_LENGTH = 5
+            shorter_len = min(len(clean_ocr_no), len(clean_mrz_no))
             is_consistent = (
                 clean_ocr_no == clean_mrz_no
-                or clean_ocr_no in clean_mrz_no
-                or clean_mrz_no in clean_ocr_no
+                or (
+                    shorter_len >= MIN_SUBSTRING_MATCH_LENGTH
+                    and (clean_ocr_no in clean_mrz_no or clean_mrz_no in clean_ocr_no)
+                )
                 or fuzzy_equal(clean_ocr_no, clean_mrz_no)
             )
             if not is_consistent:
