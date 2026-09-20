@@ -11,6 +11,16 @@ import {
 
 const API_BASE = '/api';
 
+// Required (X-API-Key header) for the two most sensitive, irreversible
+// actions: case deletion and the biometric purge protocol -- see
+// backend/app/api/deps.py's require_officer_auth for what this does and
+// does not protect against (a minimal gate, not full per-officer auth).
+// Falls back to the backend's own default so the demo works out of the box;
+// override via a VITE_OFFICER_API_KEY build-time env var if the backend's
+// OFFICER_API_KEY is changed from its default.
+const OFFICER_API_KEY =
+  import.meta.env.VITE_OFFICER_API_KEY || 'bordermesh-sih2026-officer-key-change-in-production';
+
 export const api = {
   async getHealth() {
     const res = await fetch(`${API_BASE}/health`);
@@ -77,7 +87,8 @@ export const api = {
 
   async deleteCase(caseId: string): Promise<{ message: string }> {
     const res = await fetch(`${API_BASE}/cases/${caseId}`, {
-      method: 'DELETE'
+      method: 'DELETE',
+      headers: { 'X-API-Key': OFFICER_API_KEY }
     });
     if (!res.ok) throw new Error('Failed to delete case data');
     return res.json();
@@ -91,7 +102,8 @@ export const api = {
     audit_hash: string;
   }> {
     const res = await fetch(`${API_BASE}/cases/${caseId}/purge-biometrics`, {
-      method: 'POST'
+      method: 'POST',
+      headers: { 'X-API-Key': OFFICER_API_KEY }
     });
     if (!res.ok) throw new Error('Failed to purge case biometrics');
     return res.json();

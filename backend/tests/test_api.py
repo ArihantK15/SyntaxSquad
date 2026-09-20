@@ -1,6 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 from app.main import app
+from app.core.config import settings
 
 # Starlette's TestClient only runs the app's lifespan (startup/shutdown --
 # here, Base.metadata.create_all plus initial seeding) when entered as a
@@ -10,6 +11,11 @@ from app.main import app
 # written, and close it after the last test.
 _client_cm = TestClient(app)
 client = _client_cm.__enter__()
+
+# Case deletion and biometric purge require this header (see
+# app.api.deps.require_officer_auth) -- tests of the legitimate authenticated
+# flow for either endpoint must send it.
+OFFICER_AUTH_HEADERS = {"X-API-Key": settings.OFFICER_API_KEY}
 
 
 def teardown_module(module):
@@ -229,8 +235,10 @@ def test_biometrics_purge_protocol():
     assert demo_res.status_code == 200
     case_id = demo_res.json()["case_id"]
 
-    # Trigger biometrics purge
-    purge_res = client.post(f"/api/cases/{case_id}/purge-biometrics")
+    # Trigger biometrics purge (requires officer auth -- see
+    # test_purge_biometrics_rejects_unauthenticated_requests for the
+    # rejection path)
+    purge_res = client.post(f"/api/cases/{case_id}/purge-biometrics", headers=OFFICER_AUTH_HEADERS)
     assert purge_res.status_code == 200
     pdata = purge_res.json()
     assert pdata["biometrics_purged"] is True
@@ -244,6 +252,64 @@ def test_biometrics_purge_protocol():
     assert cdata["biometrics_purged"] is True
     assert cdata["analyses"][0]["biometrics_purged"] is True
     assert cdata["analyses"][0]["document_image_path"] == "[PURGED_PRIVACY_COMPLIANCE]"
+
+def test_purge_biometrics_rejects_unauthenticated_requests():
+    """
+    Biometric purge is an irreversible, privacy-critical action (permanently
+    deletes the document scan, live face capture, and biometric crops from
+    disk). Before this fix it had no auth check at all -- any request, with
+    no credential whatsoever, could trigger it. A request with no (or a
+    wrong) X-API-Key must be rejected, and the case's biometrics must be
+    left untouched.
+    """
+    demo_res = client.post("/api/demo/scenario", json={"scenario_key": "genuine"})
+    assert demo_res.status_code == 200
+    case_id = demo_res.json()["case_id"]
+
+    no_auth_res = client.post(f"/api/cases/{case_id}/purge-biometrics")
+    assert no_auth_res.status_code == 401
+
+    wrong_auth_res = client.post(
+        f"/api/cases/{case_id}/purge-biometrics",
+        headers={"X-API-Key": "definitely-not-the-real-key"},
+    )
+    assert wrong_auth_res.status_code == 401
+
+    # Confirm the rejected requests didn't actually purge anything.
+    case_res = client.get(f"/api/cases/{case_id}")
+    assert case_res.json()["biometrics_purged"] is False
+
+    # The correct key must still be able to perform the action -- this
+    # isn't rejecting everything indiscriminately.
+    ok_res = client.post(f"/api/cases/{case_id}/purge-biometrics", headers=OFFICER_AUTH_HEADERS)
+    assert ok_res.status_code == 200
+
+def test_delete_case_rejects_unauthenticated_requests():
+    """
+    Case deletion is permanent and unrecoverable. Before this fix it had no
+    auth check at all. A request with no (or a wrong) X-API-Key must be
+    rejected, and the case must still exist afterward.
+    """
+    demo_res = client.post("/api/demo/scenario", json={"scenario_key": "genuine"})
+    assert demo_res.status_code == 200
+    case_id = demo_res.json()["case_id"]
+
+    no_auth_res = client.delete(f"/api/cases/{case_id}")
+    assert no_auth_res.status_code == 401
+
+    wrong_auth_res = client.delete(
+        f"/api/cases/{case_id}", headers={"X-API-Key": "definitely-not-the-real-key"}
+    )
+    assert wrong_auth_res.status_code == 401
+
+    # Confirm the case still exists.
+    case_res = client.get(f"/api/cases/{case_id}")
+    assert case_res.status_code == 200
+
+    # The correct key must still be able to perform the action.
+    ok_res = client.delete(f"/api/cases/{case_id}", headers=OFFICER_AUTH_HEADERS)
+    assert ok_res.status_code == 200
+    assert client.get(f"/api/cases/{case_id}").status_code == 404
 
 def test_cors_does_not_reflect_arbitrary_origins():
     """

@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import desc
 from typing import Optional, List
 
-from app.api.deps import get_db
+from app.api.deps import get_db, require_officer_auth
 from app.models import Case, DocumentAnalysis, RiskSignal, AuditLog
 from app.schemas import CaseOut, CaseDetailOut, OfficerDecisionRequest, RiskSignalOut, AuditLogOut, PurgeBiometricsResponse
 from app.services.audit_service import AuditService
@@ -106,7 +106,7 @@ def record_officer_decision(
 
 
 @router.post("/{case_id}/purge-biometrics", response_model=PurgeBiometricsResponse)
-def purge_case_biometrics(case_id: str, db: Session = Depends(get_db)):
+def purge_case_biometrics(case_id: str, db: Session = Depends(get_db), _auth: None = Depends(require_officer_auth)):
     """
     Privacy-by-Design & GDPR Article 17 Biometric Purge Protocol:
     Permanently deletes all raw biometric artifacts (document scan, live facial capture,
@@ -174,7 +174,7 @@ def purge_case_biometrics(case_id: str, db: Session = Depends(get_db)):
 
 
 @router.delete("/{case_id}")
-def delete_case_privacy(case_id: str, db: Session = Depends(get_db)):
+def delete_case_privacy(case_id: str, db: Session = Depends(get_db), _auth: None = Depends(require_officer_auth)):
     """
     Privacy-by-Design requirement: Allows demo data deletion and scrubbing of associated biometric files.
     """

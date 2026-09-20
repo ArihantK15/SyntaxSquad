@@ -20,6 +20,19 @@ class Settings(BaseSettings):
     
     # Security
     SECRET_KEY: str = "bordermesh-sih2026-demo-secret-key-change-in-production"
+
+    # Minimal API-key gate (X-API-Key header) required for the two most
+    # sensitive, irreversible actions: permanent case deletion and the
+    # biometric purge protocol. This is NOT a full auth/session system --
+    # there is no per-user identity behind it, and since the frontend has to
+    # embed this key to call those two endpoints, it's a shared secret
+    # visible in the frontend bundle, not a real access-control boundary
+    # against a determined attacker. What it does close: neither endpoint
+    # can currently be triggered by a bare, credential-free request (e.g. a
+    # stray script, a scanner, an unauthenticated curl) -- which is the gap
+    # this was added to close before SIH judging. Revisit with real
+    # per-officer auth before any non-demo deployment.
+    OFFICER_API_KEY: str = "bordermesh-sih2026-officer-key-change-in-production"
     # No wildcard here: FastAPI/Starlette combines allow_credentials=True with
     # a "*" entry by reflecting whatever Origin header the request actually
     # sent, rather than a literal "*" -- which makes this list into a no-op
