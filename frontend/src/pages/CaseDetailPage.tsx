@@ -12,6 +12,7 @@ import { EvidenceList } from '../components/EvidenceList';
 import { AuditTimeline } from '../components/AuditTimeline';
 import { Tabs, TabItem } from '../components/Tabs';
 import { downloadCaseReportPdf } from '../lib/pdfExport';
+import { buildUploadedDocumentUrl } from '../lib/paths';
 import {
   ArrowLeft,
   Loader2,
@@ -119,9 +120,7 @@ export const CaseDetailPage: React.FC<CaseDetailPageProps> = ({ caseId, onBack }
   // Document image URL
   const isPurged = caseData.biometrics_purged || analysis?.document_image_path?.startsWith('[PURGED');
   const docImgUrl = (!isPurged && analysis?.document_image_path)
-    ? (analysis.document_image_path.startsWith('http')
-        ? analysis.document_image_path
-        : `/uploads/documents/${analysis.document_image_path.split('/').pop()}`)
+    ? buildUploadedDocumentUrl(analysis.document_image_path)
     : undefined;
 
   const handleDownloadPdf = async () => {

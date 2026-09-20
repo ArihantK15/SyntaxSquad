@@ -3,10 +3,12 @@ import re
 import time
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Body
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from typing import Dict, Any
 
 from app.api.deps import get_db
+from app.api.routes.screening import MAX_CASE_NUMBER_ATTEMPTS
 from app.core.config import settings
 from app.models import Case, DocumentAnalysis, RiskSignal, AuditLog
 from app.utils.synthetic_generator import SyntheticDocumentGenerator
@@ -126,11 +128,12 @@ def run_demo_scenario(scenario_key: str = Body(..., embed=True), db: Session = D
 
     cfg = SCENARIO_CONFIGS[key]
     case_uid = str(uuid.uuid4())
-    random_num = uuid.uuid4().hex[:5].upper()
-    case_num = f"BM-2026-{random_num}"
 
-    # Generate document file
-    doc_filename = f"specimen_{case_num}.jpg"
+    # Specimen filenames are keyed on case_uid (a full UUID4, already
+    # collision-proof) rather than the shorter, human-facing case_number
+    # below -- so a case_number collision (see _generate_unique_case_number)
+    # never has to redo the already-generated specimen images on retry.
+    doc_filename = f"specimen_{case_uid}.jpg"
     doc_path = os.path.join(settings.UPLOAD_DIR, "documents", doc_filename)
     SyntheticDocumentGenerator.generate_document(
         out_path=doc_path,
@@ -147,23 +150,35 @@ def run_demo_scenario(scenario_key: str = Body(..., embed=True), db: Session = D
     )
 
     # Generate live face file
-    live_filename = f"live_{case_num}.jpg"
+    live_filename = f"live_{case_uid}.jpg"
     live_path = os.path.join(settings.UPLOAD_DIR, "faces", live_filename)
     SyntheticDocumentGenerator.generate_live_face_image(live_path, face_photo_path=cfg["live_face_photo"])
 
-    # Create Case
-    new_case = Case(
-        id=case_uid,
-        case_number=case_num,
-        document_type="Passport",
-        country=cfg["country_name"],
-        document_number_hash=hash_identifier(cfg["doc_number"]),
-        status="PROCESSING",
-        risk_level="LOW",
-        risk_score=0.0
-    )
-    db.add(new_case)
-    db.commit()
+    # Create Case (case_number retried on the rare unique-constraint
+    # collision -- see screening.py's _create_case_with_unique_number for
+    # why this matters; a much larger 16^5 space than the manual-upload
+    # flow's 90,000, but not zero).
+    case_num = None
+    for attempt in range(MAX_CASE_NUMBER_ATTEMPTS):
+        case_num = f"BM-2026-{uuid.uuid4().hex[:5].upper()}"
+        new_case = Case(
+            id=case_uid,
+            case_number=case_num,
+            document_type="Passport",
+            country=cfg["country_name"],
+            document_number_hash=hash_identifier(cfg["doc_number"]),
+            status="PROCESSING",
+            risk_level="LOW",
+            risk_score=0.0
+        )
+        db.add(new_case)
+        try:
+            db.commit()
+            break
+        except IntegrityError:
+            db.rollback()
+            if attempt == MAX_CASE_NUMBER_ATTEMPTS - 1:
+                raise
 
     AuditService.log(db, "DOCUMENT_UPLOADED", case_uid, metadata={"scenario": cfg["title"], "specimen": doc_filename})
 

@@ -19,6 +19,16 @@ class FaceVerificationService(BaseFaceService):
     # 98.0% accuracy, 0.60% false-accept rate, 3.40% false-reject rate.
     # Returned in every result below so the UI displays this real number
     # instead of a value someone has to remember to keep in sync by hand.
+    #
+    # A FG-NET-only fine-tuned embedder was briefly wired in and recalibrated
+    # (threshold 0.70) but reverted: it regressed same-age LFW verification
+    # hard -- false-accept rate 0.60% -> 10.20%, a ~17x increase -- because it
+    # was trained on only 82 cross-age identities with no same-age diversity.
+    # That checkpoint is preserved for reference at
+    # backend/app/ml/weights/face_embedder_finetuned.fgnet_only_SANITY_CHECK.pth.bak
+    # (renamed so face_verifier.py's auto-load no longer picks it up). Do not
+    # re-wire it in; wait for the intended combined FG-NET+YLFW fine-tune
+    # (scripts/finetune_face_embedder.py) and recalibrate against that instead.
     MATCH_THRESHOLD = 0.72
 
     def __init__(self):
@@ -103,6 +113,32 @@ class FaceVerificationService(BaseFaceService):
                     "confidence": 0.90,
                     "explanation": "Automated face detector could not isolate a clear frontal portrait in document image.",
                     "score_impact": 20.0
+                }]
+            }
+
+        if len(doc_faces) > 1:
+            # Symmetric with the live-capture multiplicity check below --
+            # previously only the live side flagged this; a document image
+            # with more than one plausible face region (background pattern,
+            # hologram, a splice with two portraits) silently used
+            # doc_faces[0] (whatever order the detector happened to return)
+            # with no signal at all.
+            self.crop_and_save(doc_img, doc_faces[0], doc_crop_path)
+            return {
+                "similarity": 0.0,
+                "status": "MULTIPLE_FACES",
+                "document_face_url": f"/uploads/crops/{case_id}_doc_face.jpg",
+                "live_face_url": None,
+                "quality_checks": {"multiple_faces_detected": len(doc_faces)},
+                "anti_spoofing_score": 0.4,
+                "match_threshold": self.MATCH_THRESHOLD,
+                "signals": [{
+                    "module": "FACE",
+                    "signal": "Multiple Faces in Document Image",
+                    "severity": "MEDIUM",
+                    "confidence": 0.85,
+                    "explanation": "More than one plausible face region detected in the document image. Manual review required.",
+                    "score_impact": 15.0
                 }]
             }
 

@@ -5,6 +5,7 @@ from sqlalchemy import func, desc
 from app.api.deps import get_db
 from app.models import Case, DocumentAnalysis, RiskSignal, AuditLog
 from app.schemas import DashboardStatsOut, CaseOut
+from app.services.policy_service import get_policy
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -69,9 +70,14 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
     critical = db.query(Case).filter(Case.risk_level == "CRITICAL").count()
     cleared = db.query(Case).filter(Case.officer_decision == "CLEARED").count()
     
+    # "Requiring review" means "not clearly LOW risk" -- this must track the
+    # live, officer-editable threshold_low policy (Settings page), the same
+    # cutoff risk_engine.py itself uses to classify LOW vs MEDIUM, rather
+    # than a hardcoded value that silently drifts out of sync the moment an
+    # officer changes the policy.
     requiring_review = db.query(Case).filter(
         Case.officer_decision == "PENDING",
-        Case.risk_score >= 25.0
+        Case.risk_score >= get_policy(db).threshold_low
     ).count()
 
     # Risk Distribution

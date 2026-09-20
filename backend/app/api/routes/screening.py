@@ -2,6 +2,7 @@ import os
 import time
 import random
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from typing import Optional
 
@@ -21,6 +22,33 @@ from app.services.audit_service import AuditService
 from app.core.demo_faces import PERSON_A
 
 router = APIRouter(prefix="/screening", tags=["screening"])
+
+# 90,000 possible values (10000-99999) means a collision on case_number's
+# unique DB constraint is a real, non-negligible possibility as cases
+# accumulate (birthday-paradox growth, not a one-in-90000 flat chance) --
+# without a retry, that raised an unhandled IntegrityError straight through
+# to the client as an opaque 500 instead of just trying a new number.
+MAX_CASE_NUMBER_ATTEMPTS = 5
+
+
+def _create_case_with_unique_number(db: Session, **case_fields) -> Case:
+    """Creates and commits a new Case, retrying with a fresh random
+    case_number on a unique-constraint collision."""
+    for attempt in range(MAX_CASE_NUMBER_ATTEMPTS):
+        case_num = f"BM-2026-{random.randint(10000, 99999)}"
+        new_case = Case(case_number=case_num, **case_fields)
+        db.add(new_case)
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            if attempt == MAX_CASE_NUMBER_ATTEMPTS - 1:
+                raise
+            continue
+        db.refresh(new_case)
+        return new_case
+    raise RuntimeError("unreachable")  # loop always returns or raises above
+
 
 @router.post("/upload")
 async def upload_document(
@@ -42,21 +70,15 @@ async def upload_document(
     with open(save_path, "wb") as f:
         f.write(contents)
 
-    # Generate Case Number e.g. BM-2026-10482
-    case_num = f"BM-2026-{random.randint(10000, 99999)}"
-
-    # Create Case in DB
-    new_case = Case(
-        case_number=case_num,
+    # Create Case in DB (case_number e.g. BM-2026-10482, retried on collision)
+    new_case = _create_case_with_unique_number(
+        db,
         document_type=document_type,
         country=country,
         status="PROCESSING",
         risk_level="LOW",
         risk_score=0.0
     )
-    db.add(new_case)
-    db.commit()
-    db.refresh(new_case)
 
     # Create DocumentAnalysis record
     analysis = DocumentAnalysis(

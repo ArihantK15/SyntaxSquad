@@ -77,13 +77,23 @@ class AuditService:
         """
         Cryptographically verifies the SHA-256 chain-of-custody across the audit ledger.
         Proves mathematical immutability and flags any tampered records.
-        """
-        query = db.query(AuditLog)
-        if case_id:
-            query = query.filter(AuditLog.case_id == case_id)
-        logs = query.order_by(asc(AuditLog.timestamp), asc(AuditLog.id)).all()
 
-        if not logs:
+        The linkage walk always covers the FULL, unfiltered ledger in true
+        insertion order -- a hash chain's forward links only hold across the
+        real sequence entries were appended in (see `log`'s single global
+        `latest_entry` lookup), and a single case's own audit entries are
+        interleaved with every other case's, so a case-filtered subsequence
+        has no independent chain of its own to check: entry N's stored
+        previous_hash points at whatever the previous GLOBAL entry was, not
+        at case-filtered entry N-1. When `case_id` is given, the walk still
+        runs over the whole ledger (that's the only way a break anywhere can
+        be detected at all), but `total_records`/`head_hash` are reported
+        scoped to that case for display.
+        """
+        all_logs = db.query(AuditLog).order_by(asc(AuditLog.timestamp), asc(AuditLog.id)).all()
+        case_logs = [l for l in all_logs if l.case_id == case_id] if case_id else all_logs
+
+        if not case_logs:
             return {
                 "valid": True,
                 "total_records": 0,
@@ -94,8 +104,29 @@ class AuditService:
                 "reason": "Ledger is empty (0 blocks)."
             }
 
-        # Verify chain integrity
-        for i, log in enumerate(logs):
+        # Verify chain integrity. Two independent checks per block, since
+        # either alone is insufficient: (1) the block's own entry_hash must
+        # match a fresh hash of its own stored fields (catches a block
+        # edited without re-signing it at all), and (2) the block's stored
+        # previous_hash must equal the ACTUAL previous block's entry_hash in
+        # this ordered sequence -- not just whatever previous_hash happens to
+        # be stored on the block itself (catches a block whose content was
+        # edited and then re-signed in isolation, which trivially passes
+        # check (1) against its own unchanged previous_hash field but breaks
+        # the real link to its predecessor).
+        expected_prev_hash = GENESIS_HASH
+        for i, log in enumerate(all_logs):
+            if (log.previous_hash or GENESIS_HASH) != expected_prev_hash:
+                return {
+                    "valid": False,
+                    "total_records": len(case_logs),
+                    "head_hash": case_logs[-1].entry_hash,
+                    "genesis_hash": GENESIS_HASH,
+                    "verified_at": datetime.utcnow(),
+                    "compromised_id": log.id,
+                    "reason": f"Chain linkage broken at block #{i+1} (Action: {log.action}, Actor: {log.actor}): stored previous_hash does not match the preceding block's actual hash."
+                }
+
             meta_str = cls.canonical_json(log.metadata_json)
             ts_str = log.timestamp.isoformat() if isinstance(log.timestamp, datetime) else str(log.timestamp)
 
@@ -112,20 +143,22 @@ class AuditService:
             if log.entry_hash and log.entry_hash != expected_hash:
                 return {
                     "valid": False,
-                    "total_records": len(logs),
-                    "head_hash": logs[-1].entry_hash,
+                    "total_records": len(case_logs),
+                    "head_hash": case_logs[-1].entry_hash,
                     "genesis_hash": GENESIS_HASH,
                     "verified_at": datetime.utcnow(),
                     "compromised_id": log.id,
                     "reason": f"Hash signature mismatch at block #{i+1} (Action: {log.action}, Actor: {log.actor})."
                 }
 
+            expected_prev_hash = log.entry_hash or GENESIS_HASH
+
         return {
             "valid": True,
-            "total_records": len(logs),
-            "head_hash": logs[-1].entry_hash or GENESIS_HASH,
+            "total_records": len(case_logs),
+            "head_hash": case_logs[-1].entry_hash or GENESIS_HASH,
             "genesis_hash": GENESIS_HASH,
             "verified_at": datetime.utcnow(),
             "compromised_id": None,
-            "reason": f"All {len(logs)} blocks cryptographically verified intact via SHA-256 chaining."
+            "reason": f"All {len(all_logs)} blocks cryptographically verified intact via SHA-256 chaining."
         }

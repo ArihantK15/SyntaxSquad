@@ -181,6 +181,87 @@ def test_policy_change_actually_changes_a_real_screening_result():
         "threshold_low": 24, "threshold_medium": 49, "threshold_high": 74
     })
 
+def test_dashboard_requiring_review_kpi_respects_the_configured_low_threshold():
+    """
+    The dashboard's "cases requiring review" KPI hardcoded a `risk_score >=
+    25.0` cutoff, completely decoupled from the officer-editable
+    threshold_low policy (Settings page / policy_service.py) that actually
+    defines the real LOW/MEDIUM boundary used everywhere else (risk_engine.py
+    classifies risk_level from this same threshold_low). After an officer
+    raises threshold_low well above a pending case's score, that case is
+    unambiguously LOW risk under the now-configured policy and must stop
+    being counted as "requiring review" -- otherwise the KPI silently stops
+    reflecting the policy an officer just configured.
+    """
+    from app.core.database import SessionLocal
+    from app.models import Case
+
+    import uuid
+    db = SessionLocal()
+    try:
+        probe_case = Case(
+            case_number=f"BM-2026-RVW{uuid.uuid4().hex[:5].upper()}",
+            document_type="Passport",
+            country="Unknown",
+            status="PROCESSING",
+            risk_level="LOW",
+            risk_score=30.0,
+            officer_decision="PENDING",
+        )
+        db.add(probe_case)
+        db.commit()
+        probe_case_id = probe_case.id
+    finally:
+        db.close()
+
+    try:
+        # The probe case (score 30, PENDING) straddles both threshold
+        # values tried below, so each one exercises a real change in its
+        # membership -- but the assertion itself doesn't hardcode any
+        # specific count: it independently recomputes "how many PENDING
+        # cases have risk_score >= <the live threshold_low>" directly via
+        # the DB (the correct formula) and checks the dashboard endpoint's
+        # own reported count matches it EXACTLY, at two different
+        # threshold_low values. The old hardcoded `>= 25.0` could only ever
+        # coincidentally match this independently-computed expectation;
+        # tying the KPI to the live policy makes it match at any threshold.
+        for threshold_low in (10, 60):
+            policy = {
+                "weight_mrz": 0.25, "weight_tamper": 0.30, "weight_face": 0.30,
+                "weight_consistency": 0.10, "weight_watchlist": 0.05,
+                "threshold_low": threshold_low,
+                "threshold_medium": threshold_low + 15,
+                "threshold_high": threshold_low + 30,
+            }
+            update_res = client.post("/api/settings/policy", json=policy)
+            assert update_res.status_code == 200
+
+            stats = client.get("/api/dashboard/stats").json()
+
+            db2 = SessionLocal()
+            try:
+                expected = (
+                    db2.query(Case)
+                    .filter(Case.officer_decision == "PENDING", Case.risk_score >= threshold_low)
+                    .count()
+                )
+            finally:
+                db2.close()
+
+            assert stats["cases_requiring_review"] == expected
+    finally:
+        client.post("/api/settings/policy", json={
+            "weight_mrz": 0.25, "weight_tamper": 0.30, "weight_face": 0.30,
+            "weight_consistency": 0.10, "weight_watchlist": 0.05,
+            "threshold_low": 24, "threshold_medium": 49, "threshold_high": 74
+        })
+        db2 = SessionLocal()
+        try:
+            db2.query(Case).filter(Case.id == probe_case_id).delete()
+            db2.commit()
+        finally:
+            db2.close()
+
 def test_officer_decision_recording():
     # Fetch first case
     cases_res = client.get("/api/cases?limit=1")
@@ -228,6 +309,80 @@ def test_central_audit_and_chain_verification():
     sdata = stats_res.json()
     assert sdata["total_blocks"] > 0
     assert len(sdata["head_hash"]) == 64
+
+def test_chain_verification_detects_a_block_tampered_and_self_resigned():
+    """
+    Reproduces a real gap found while reviewing the audit chain: verify_chain
+    recomputed each block's hash from that SAME block's own stored fields
+    (including its own previous_hash) and compared the result to itself --
+    which only proves a block is internally self-consistent, never that it
+    is the block the NEXT entry's previous_hash actually points to. Anyone
+    with DB write access can edit one block's content and recompute just
+    that block's own entry_hash (pure SHA-256 over public fields, no secret
+    key involved) without touching any other row, and the chain reported
+    "valid" regardless -- defeating the entire point of a hash chain.
+
+    This tampers one real block's action field, re-signs ONLY that block's
+    own entry_hash (self-consistent, exactly what a real attacker who knows
+    the hash algorithm would do), and confirms verification must catch it by
+    noticing the next block's previous_hash no longer matches this block's
+    (new) entry_hash.
+    """
+    from app.core.database import SessionLocal
+    from app.models import AuditLog
+    from app.services.audit_service import AuditService
+
+    demo_res = client.post("/api/demo/scenario", json={"scenario_key": "genuine"})
+    assert demo_res.status_code == 200
+    case_id = demo_res.json()["case_id"]
+
+    db = SessionLocal()
+    try:
+        logs = (
+            db.query(AuditLog)
+            .filter(AuditLog.case_id == case_id)
+            .order_by(AuditLog.timestamp.asc(), AuditLog.id.asc())
+            .all()
+        )
+        # Need a block with both a predecessor and a successor so the broken
+        # forward-linkage check has something to actually catch.
+        assert len(logs) >= 3
+        target = logs[1]
+        original_action = target.action
+        original_entry_hash = target.entry_hash
+
+        tampered_action = target.action + "_TAMPERED"
+        ts_str = target.timestamp.isoformat()
+        meta_str = AuditService.canonical_json(target.metadata_json)
+        resigned_hash = AuditService.compute_hash(
+            previous_hash=target.previous_hash or ("0" * 64),
+            case_id=target.case_id,
+            action=tampered_action,
+            actor=target.actor,
+            timestamp_str=ts_str,
+            metadata_str=meta_str,
+        )
+        target.action = tampered_action
+        target.entry_hash = resigned_hash
+        db.commit()
+
+        try:
+            verify_res = client.get("/api/audit/verify")
+            assert verify_res.status_code == 200
+            vdata = verify_res.json()
+            assert vdata["valid"] is False
+            assert vdata["compromised_id"] is not None
+        finally:
+            # This is a shared, persistent ledger (this whole suite reuses
+            # one sqlite DB, and a broken hash chain has global, cascading
+            # effects on every later chain check) -- restore the block to
+            # its original, correctly-chained state so this test doesn't
+            # leave the ledger permanently invalid for every test/run after it.
+            target.action = original_action
+            target.entry_hash = original_entry_hash
+            db.commit()
+    finally:
+        db.close()
 
 def test_biometrics_purge_protocol():
     # Execute a demo scenario to create fresh case
@@ -451,4 +606,68 @@ def test_aadhaar_document_never_gets_a_fabricated_mrz(tmp_path):
         "MRZ" in s["signal"] or "Document Number Inconsistency" in s["signal"]
         for s in body["validation_result"]["signals"]
     )
+
+def test_upload_survives_a_random_case_number_collision(tmp_path, monkeypatch):
+    """
+    case_number is `f"BM-2026-{random.randint(10000, 99999)}"` with a unique
+    DB constraint and, before this fix, no collision handling -- only 90,000
+    possible values, so a collision is a real (if individually unlikely)
+    possibility as cases accumulate, and previously produced an unhandled
+    IntegrityError -> 500 instead of a working upload. Forces a collision
+    deterministically by making random.randint always return the same
+    value as an existing case's number, and confirms upload still succeeds
+    (with a genuinely different, non-colliding case number) rather than
+    failing outright.
+    """
+    import random
+    from PIL import Image
+    from app.core.database import SessionLocal
+    from app.models import Case
+
+    colliding_number_suffix = 54321
+    db = SessionLocal()
+    try:
+        # Idempotent setup: this suite reuses one persistent DB across runs,
+        # so a leftover row from a previous run of this same test would
+        # otherwise collide with this fixture insert itself.
+        db.query(Case).filter(Case.case_number == f"BM-2026-{colliding_number_suffix}").delete()
+        db.commit()
+
+        pre_existing = Case(
+            case_number=f"BM-2026-{colliding_number_suffix}",
+            document_type="Passport",
+            country="Unknown",
+            status="PROCESSING",
+            risk_level="LOW",
+            risk_score=0.0,
+        )
+        db.add(pre_existing)
+        db.commit()
+    finally:
+        db.close()
+
+    call_count = {"n": 0}
+    real_randint = random.randint
+
+    def rigged_randint(a, b):
+        # First call collides with the pre-existing case; every call after
+        # that behaves normally so a retry can actually succeed.
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return colliding_number_suffix
+        return real_randint(a, b)
+
+    monkeypatch.setattr(random, "randint", rigged_randint)
+
+    img_path = tmp_path / "collision.jpg"
+    Image.new("RGB", (100, 100), "white").save(img_path)
+
+    upload_resp = client.post(
+        "/api/screening/upload",
+        files={"file": ("collision.jpg", open(img_path, "rb"), "image/jpeg")},
+        data={"document_type": "Passport", "country": "Unknown"},
+    )
+    assert upload_resp.status_code == 200
+    assert upload_resp.json()["case_number"] != f"BM-2026-{colliding_number_suffix}"
+    assert call_count["n"] >= 2
 

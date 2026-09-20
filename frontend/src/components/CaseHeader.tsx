@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { CaseDetail, OfficerDecision } from '../types';
 import { RiskBadge } from './RiskBadge';
 import { Shield, Clock, Globe, FileText, CheckCircle, AlertTriangle, Send, Trash2 } from 'lucide-react';
@@ -22,6 +22,19 @@ export const CaseHeader: React.FC<CaseHeaderProps> = ({
   const [submitting, setSubmitting] = useState(false);
   const [purging, setPurging] = useState(false);
   const [deleting, setDeleting] = useState(false);
+
+  // useState's initial value only runs once, on mount -- so if the parent
+  // re-fetches this same case (the "Refresh" button, or another officer's
+  // decision landing between polls) with a different officer_decision /
+  // officer_notes than what this form was seeded with, the form silently
+  // kept showing the stale value instead of the freshly fetched one. Only
+  // resyncs when the SERVER value actually changes, so an officer's own
+  // in-progress, not-yet-submitted edit here is never clobbered by an
+  // unrelated caseData update (e.g. a biometrics purge).
+  useEffect(() => {
+    setDecision(caseData.officer_decision !== 'PENDING' ? caseData.officer_decision : 'CLEARED');
+    setNotes(caseData.officer_notes || '');
+  }, [caseData.officer_decision, caseData.officer_notes]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
