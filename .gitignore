@@ -1,11 +1,26 @@
 # Environments
 venv/
 .venv/
+.venv-backend/
+.venv-train/
 env/
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
+
+# Local-only ML datasets (CASIA v2.0, MIDV-2020, FG-NET -- see
+# scripts/evaluate_*.py / scripts/finetune_*.py) -- multiple GB, never meant
+# to be committed.
+data/
+
+# Model weight experiments/backups dropped into this directory. Explicitly
+# keeps the one committed production checkpoint (tamper_cnn.pth) -- already-
+# tracked files are unaffected by new ignore rules, so this doesn't untrack
+# it; it only stops future stray/experimental weights (e.g. a *.pth.bak
+# sanity-check backup) from being picked up by a broad `git add`.
+backend/app/ml/weights/*
+!backend/app/ml/weights/tamper_cnn.pth
 
 # Node
 node_modules/

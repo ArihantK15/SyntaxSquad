@@ -3,8 +3,19 @@ dist
 .git
 .gitignore
 venv
+.venv-backend
+.venv-train
 __pycache__
 *.pyc
 .DS_Store
 border_mesh.db
 uploads
+# Local-only ML datasets (scripts/evaluate_*.py, scripts/finetune_*.py) and
+# stray experiment checkpoints -- multiple GB, not referenced by any
+# Dockerfile COPY instruction, but with no rule excluding them they still
+# get walked/hashed as part of the build context (this backend service's
+# context is the WHOLE repo root, not just backend/) and a *.bak checkpoint
+# left inside backend/app/ml/weights/ would otherwise be copied straight
+# into the image via `COPY backend ./backend`.
+data
+*.bak
