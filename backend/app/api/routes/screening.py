@@ -10,7 +10,7 @@ from app.api.deps import get_db
 from app.core.config import settings
 from app.core.security import validate_image_upload, sanitize_filename, hash_identifier
 from app.models import Case, DocumentAnalysis, RiskSignal, AuditLog
-from app.services.ocr_service import get_ocr_service
+from app.services.ocr_service import get_ocr_service, TesseractOCRService
 from app.services.mrz_service import MRZService
 from app.services.rules_engine import DocumentRulesEngine
 from app.services.tamper_service import get_tamper_service
@@ -130,15 +130,16 @@ def process_ocr(case_id: str, db: Session = Depends(get_db)):
     # whole-document text pass above. Falls back gracefully if unavailable
     # (e.g. MockOCRService, which has no extract_mrz_lines method).
     #
-    # Skipped entirely for Aadhaar: it has no ICAO MRZ by design, so this
-    # crops the bottom ~30% of the page looking for one anyway. A real
-    # e-Aadhaar PDF/screenshot has a dense English disclaimer paragraph in
-    # exactly that band -- observed live to garble into text that still
-    # passes the "looks MRZ-shaped" heuristic (long enough, contains '<'),
-    # which the MRZ parser then "validates" as a forged passport MRZ with
-    # every checksum failing. Running this pass on a document that
-    # structurally can't have an MRZ only manufactures false positives.
-    if hasattr(ocr_svc, "extract_mrz_lines") and ocr_result.get("fields", {}).get("document_type") != "AADHAAR":
+    # Skipped entirely for Aadhaar/PAN/Driving Licence: none of them have an
+    # ICAO MRZ by design, so this crops the bottom ~30% of the page looking
+    # for one anyway. A real e-Aadhaar PDF/screenshot has a dense English
+    # disclaimer paragraph in exactly that band -- observed live to garble
+    # into text that still passes the "looks MRZ-shaped" heuristic (long
+    # enough, contains '<'), which the MRZ parser then "validates" as a
+    # forged passport MRZ with every checksum failing. Running this pass on
+    # a document that structurally can't have an MRZ only manufactures false
+    # positives.
+    if hasattr(ocr_svc, "extract_mrz_lines") and ocr_result.get("fields", {}).get("document_type") not in TesseractOCRService.NON_MRZ_DOCUMENT_TYPES:
         ocr_result["mrz_lines"] = ocr_svc.extract_mrz_lines(analysis.document_image_path)
     else:
         ocr_result["mrz_lines"] = []
@@ -178,16 +179,17 @@ def process_mrz_and_validation(case_id: str, db: Session = Depends(get_db)):
     detected_lines = ocr_result.get("detected_lines", [])
     mrz_lines = ocr_result.get("mrz_lines", [])
 
-    # Aadhaar cards have no ICAO MRZ by design -- never attempt to find one,
-    # regardless of what either OCR pass turns up. Both MRZ scanners key off
-    # a generic "long line containing '<'" shape heuristic, and a real
-    # e-Aadhaar page's English disclaimer paragraph (or its QR/signature
-    # block) has been observed live to garble into text that satisfies it,
-    # producing a fabricated MRZ whose checksums then "fail" against a real,
-    # unaltered card. Guarding at this single point (rather than only at the
-    # dedicated-pass call site) closes that off no matter which pass -- or
-    # any future one -- would have produced the false match.
-    if ocr_result.get("fields", {}).get("document_type") == "AADHAAR":
+    # Aadhaar/PAN/Driving Licence cards have no ICAO MRZ by design -- never
+    # attempt to find one, regardless of what either OCR pass turns up. Both
+    # MRZ scanners key off a generic "long line containing '<'" shape
+    # heuristic, and a real e-Aadhaar page's English disclaimer paragraph
+    # (or its QR/signature block) has been observed live to garble into text
+    # that satisfies it, producing a fabricated MRZ whose checksums then
+    # "fail" against a real, unaltered card. Guarding at this single point
+    # (rather than only at the dedicated-pass call site) closes that off no
+    # matter which pass -- or any future one -- would have produced the
+    # false match.
+    if ocr_result.get("fields", {}).get("document_type") in TesseractOCRService.NON_MRZ_DOCUMENT_TYPES:
         mrz_data = None
     else:
         # Prefer the dedicated MRZ-band OCR pass (crop/upscale/restricted-charset --

@@ -180,3 +180,116 @@ def test_passport_without_mrz_still_flagged():
     ocr_data = {"fields": {"full_name": "JOHN DOE", "document_number": "A9999999"}}
     eval_res = DocumentRulesEngine.evaluate(ocr_data, None)
     assert any(s["signal"] == "Missing Machine Readable Zone" for s in eval_res["signals"])
+
+def test_pan_document_not_penalized_for_missing_mrz():
+    """PAN cards are an Income Tax Department ID, not an ICAO 9303 travel
+    document -- like Aadhaar, they must not be flagged for having no MRZ."""
+    ocr_data = {
+        "fields": {
+            "full_name": "RAVI KUMAR SHARMA",
+            "document_number": "ABCPK1234F",
+            "document_type": "PAN"
+        }
+    }
+    eval_res = DocumentRulesEngine.evaluate(ocr_data, None)
+    assert not any(s["signal"] == "Missing Machine Readable Zone" for s in eval_res["signals"])
+    mrz_rule = [r for r in eval_res["rules_detail"] if r["rule"] == "MRZ_PRESENCE"][0]
+    assert mrz_rule["passed"] is True
+
+def test_dl_document_not_penalized_for_missing_mrz():
+    """Driving Licences carry no ICAO MRZ either -- same exemption as
+    Aadhaar/PAN."""
+    ocr_data = {
+        "fields": {
+            "full_name": "RAVI KUMAR SHARMA",
+            "document_number": "MH1220110012345",
+            "document_type": "DRIVING_LICENSE"
+        }
+    }
+    eval_res = DocumentRulesEngine.evaluate(ocr_data, None)
+    assert not any(s["signal"] == "Missing Machine Readable Zone" for s in eval_res["signals"])
+
+def test_pan_format_validation_passes_for_well_formed_pan_and_decodes_entity_type():
+    ocr_data = {
+        "fields": {
+            "full_name": "RAVI KUMAR SHARMA",
+            "document_number": "ABCPK1234F",
+            "document_type": "PAN"
+        }
+    }
+    eval_res = DocumentRulesEngine.evaluate(ocr_data, None)
+    pan_rule = [r for r in eval_res["rules_detail"] if r["rule"] == "PAN_FORMAT_VALIDATION"][0]
+    assert pan_rule["passed"] is True
+    assert "Individual" in pan_rule["explanation"]
+    assert not any("PAN" in s["signal"] for s in eval_res["signals"])
+
+def test_pan_format_validation_fails_for_malformed_structure():
+    """A structurally invalid PAN (wrong character classes/length) is a real,
+    verifiable format violation -- CBDT's published PAN structure is fixed
+    (5 letters, 4 digits, 1 letter), not free text."""
+    ocr_data = {
+        "fields": {
+            "full_name": "RAVI KUMAR SHARMA",
+            "document_number": "ABCP1234F",  # only 4 letters before the digits
+            "document_type": "PAN"
+        }
+    }
+    eval_res = DocumentRulesEngine.evaluate(ocr_data, None)
+    pan_rule = [r for r in eval_res["rules_detail"] if r["rule"] == "PAN_FORMAT_VALIDATION"][0]
+    assert pan_rule["passed"] is False
+    assert any(s["signal"] == "Malformed PAN Structure" for s in eval_res["signals"])
+
+def test_pan_format_validation_flags_unrecognized_entity_letter():
+    """The 4th PAN character encodes a documented, enumerable entity type
+    (P=Individual, C=Company, etc.) -- a structurally valid PAN whose 4th
+    letter isn't one of those codes is suspicious even though the shape is
+    otherwise fine."""
+    ocr_data = {
+        "fields": {
+            "full_name": "RAVI KUMAR SHARMA",
+            "document_number": "ABCZK1234F",  # 'Z' is not a recognized entity-type code
+            "document_type": "PAN"
+        }
+    }
+    eval_res = DocumentRulesEngine.evaluate(ocr_data, None)
+    assert any(s["signal"] == "Unrecognized PAN Entity-Type Code" for s in eval_res["signals"])
+
+def test_pan_rule_skipped_for_non_pan_documents():
+    """A passport document number that happens to be PAN-shaped must not
+    trigger PAN-specific validation -- the rule is gated on document_type,
+    not on the number's shape alone."""
+    ocr_data = {"fields": {"document_number": "ABCPK1234F", "document_type": "PASSPORT"}}
+    eval_res = DocumentRulesEngine.evaluate(ocr_data, None)
+    assert not any(r["rule"] == "PAN_FORMAT_VALIDATION" for r in eval_res["rules_detail"])
+
+def test_dl_expiry_uses_ocr_field_when_no_mrz_present():
+    """
+    A Driving Licence has a genuine printed expiry ("Valid Till") but no
+    MRZ -- RULE 2 (DOCUMENT_EXPIRATION) was previously MRZ-only, so an
+    expired DL was silently never checked at all. It must be checked the
+    same way an expired passport is.
+    """
+    ocr_data = {
+        "fields": {
+            "document_number": "MH1220110012345",
+            "document_type": "DRIVING_LICENSE",
+            "date_of_expiry": "20/03/2020"  # expired
+        }
+    }
+    eval_res = DocumentRulesEngine.evaluate(ocr_data, None)
+    assert any(s["signal"] == "Document Expired" for s in eval_res["signals"])
+    expired_rule = [r for r in eval_res["rules_detail"] if r["rule"] == "DOCUMENT_EXPIRATION"][0]
+    assert expired_rule["passed"] is False
+
+def test_dl_valid_expiry_passes():
+    ocr_data = {
+        "fields": {
+            "document_number": "MH1220110012345",
+            "document_type": "DRIVING_LICENSE",
+            "date_of_expiry": "20/03/2031"  # not yet expired
+        }
+    }
+    eval_res = DocumentRulesEngine.evaluate(ocr_data, None)
+    expired_rule = [r for r in eval_res["rules_detail"] if r["rule"] == "DOCUMENT_EXPIRATION"][0]
+    assert expired_rule["passed"] is True
+    assert not any(s["signal"] == "Document Expired" for s in eval_res["signals"])

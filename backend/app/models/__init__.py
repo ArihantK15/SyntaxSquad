@@ -88,6 +88,36 @@ class AuditLog(Base):
     case = relationship("Case", back_populates="audit_logs")
 
 
+class BlockchainAnchor(Base):
+    """
+    On-demand, best-effort anchoring of the audit ledger's head hash (see
+    AuditService -- the head hash already commits to the FULL chain history
+    by construction, since each entry_hash embeds the previous one, so
+    anchoring it is equivalent to anchoring a Merkle root) to a public
+    blockchain testnet. This lets an independent verifier confirm a specific
+    hash value existed at a specific, un-forgeable block time, without
+    trusting this application's own database at all.
+
+    Deliberately isolated from AuditService.log()/verify_chain(): this table
+    and the service that writes to it (app.services.blockchain_anchor_service)
+    are never called from that hot path, so a testnet RPC outage or an empty
+    faucet wallet cannot affect the core, already-working local hash-chain
+    audit trail.
+    """
+    __tablename__ = "blockchain_anchors"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    head_hash = Column(String(64), nullable=False)
+    total_records_at_anchor = Column(Integer, nullable=False)
+    network = Column(String(64), nullable=False)  # e.g. "Ethereum Sepolia"
+    chain_id = Column(Integer, nullable=False)
+    tx_hash = Column(String(66), nullable=False, unique=True)
+    block_number = Column(Integer, nullable=True)
+    explorer_url = Column(String(255), nullable=False)
+    anchored_by = Column(String(128), default="OFFICER-DEMO-01")
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 class PolicySettings(Base):
     """
     Single-row table (id is always 1) holding the live-editable risk engine

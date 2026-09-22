@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, ConfigDict
 
-from app.api.deps import get_db
+from app.api.deps import get_db, require_officer_auth
 from app.services.policy_service import get_policy, update_policy, PolicyValidationError
 
 router = APIRouter(prefix="/settings", tags=["settings"])
@@ -40,7 +40,17 @@ def get_policy_settings(db: Session = Depends(get_db)):
 
 
 @router.post("/policy", response_model=PolicyOut)
-def update_policy_settings(payload: PolicyUpdate, db: Session = Depends(get_db)):
+def update_policy_settings(
+    payload: PolicyUpdate,
+    db: Session = Depends(get_db),
+    _auth: None = Depends(require_officer_auth)
+):
+    # Risk-engine weights/thresholds directly drive every case's
+    # LOW/MEDIUM/HIGH/CRITICAL classification (see risk_engine.py) --
+    # comparable in impact to case deletion or biometric purge, so this
+    # gets the same X-API-Key gate as those two routes (see
+    # app.api.deps.require_officer_auth).
+    #
     # The weights-sum-to-100% / ascending-thresholds invariant is enforced
     # inside update_policy itself (see policy_service.py) so it holds no
     # matter what calls it -- this just translates that into an HTTP error.

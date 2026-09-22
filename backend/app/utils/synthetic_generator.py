@@ -328,3 +328,188 @@ class SyntheticDocumentGenerator:
             "given_names": given_names,
             "country": country_name
         }
+
+    @staticmethod
+    def _format_yymmdd_display(yymmdd: str) -> str:
+        """
+        Formats a YYMMDD string as DD/MM/YYYY for on-image field rendering,
+        using the same century heuristic as
+        DocumentRulesEngine.parse_yymmdd/parse_ddmmyyyy (00-45 -> 20xx,
+        46-99 -> 19xx). generate_document's own passport DOB field instead
+        always prepends "20" regardless of century -- a pre-existing quirk
+        left as-is there; not propagated here, since the PAN/DL specimens
+        below need their printed dates to round-trip correctly through a
+        real OCR pass.
+        """
+        yy = int(yymmdd[:2])
+        mm = yymmdd[2:4]
+        dd = yymmdd[4:6]
+        year = 2000 + yy if yy <= 45 else 1900 + yy
+        return f"{dd}/{mm}/{year}"
+
+    @classmethod
+    def generate_pan_card(
+        cls,
+        out_path: str,
+        mode: str = "genuine",
+        surname: str = "VERMA",
+        given_names: str = "ANANYA",
+        father_name: str = "RAJESH VERMA",
+        doc_number: str = "ABCPV1234F",
+        dob_yymmdd: str = "920615",
+        face_photo_path: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Creates a synthetic Indian PAN (Permanent Account Number) card
+        specimen. A PAN card has no ICAO MRZ -- the "INCOME TAX DEPARTMENT"
+        / "PERMANENT ACCOUNT NUMBER" boilerplate drawn below is itself what
+        TesseractOCRService._detect_document_type keys off (see
+        ocr_service.py's PAN_MARKERS) to route OCR to the PAN field parser
+        instead of the passport one.
+
+        Modes: 'genuine' only for now -- there is no PAN-specific visual
+        tamper scenario wired up yet. RULE 1b's format/entity-type check
+        (rules_engine.py) is exercised directly by hand-authored field
+        dicts in test_rules.py rather than by a corrupted specimen here.
+        """
+        w, h = cls.WIDTH, cls.HEIGHT
+        img = Image.new("RGB", (w, h), color=(248, 250, 252))
+        draw = ImageDraw.Draw(img)
+
+        # Subtle security guilloche pattern, matching the passport specimen's own
+        for y in range(0, h, 12):
+            color = (230, 238, 248) if (y // 12) % 2 == 0 else (238, 244, 252)
+            draw.line([(0, y), (w, y)], fill=color, width=1)
+        for x in range(0, w, 24):
+            draw.line([(x, 0), (x, h)], fill=(240, 246, 254), width=1)
+
+        # Header banner
+        draw.rectangle([0, 0, w, 70], fill=(15, 23, 42))
+        draw.rectangle([0, 70, w, 74], fill=(59, 130, 246))
+        draw.text((25, 16), "INCOME TAX DEPARTMENT", fill=(255, 255, 255))
+        draw.text((25, 42), "GOVT. OF INDIA • FICTIONAL TEST SPECIMEN", fill=(148, 163, 184))
+        draw.text((w - 340, 25), "PERMANENT ACCOUNT NUMBER CARD", fill=(203, 213, 225))
+
+        # Photo
+        if face_photo_path:
+            cls._paste_photo(img, face_photo_path, 40, 100, 240, 320)
+            draw.rectangle([40, 100, 40 + 240, 100 + 320], outline=(150, 160, 180), width=2)
+        else:
+            cls._draw_avatar(draw, 40, 100, 240, 320, variant=1)
+
+        full_name = f"{given_names} {surname}".upper()
+        fields = [
+            ("PERMANENT ACCOUNT NUMBER", doc_number),
+            ("NAME", full_name),
+            ("FATHER'S NAME", father_name.upper()),
+            ("DATE OF BIRTH", cls._format_yymmdd_display(dob_yymmdd)),
+        ]
+
+        label_font = cls._load_font(12)
+        value_font = cls._load_font(18)
+        left_text = 320
+        cur_y = 95
+        for label, val in fields:
+            draw.text((left_text, cur_y), label, fill=(100, 116, 139), font=label_font)
+            draw.text((left_text, cur_y + 18), str(val), fill=(15, 23, 42), font=value_font)
+            cur_y += 48
+
+        # Security emblem stamp watermark, matching the passport specimen's own
+        draw.ellipse([w - 180, 250, w - 40, 390], outline=(219, 234, 254), width=4)
+        draw.text((w - 165, 310), "SIMULATED\nSPECIMEN", fill=(191, 219, 254))
+
+        img.save(out_path, "JPEG", quality=95)
+
+        return {
+            "image_path": out_path,
+            "mode": mode,
+            "doc_number": doc_number,
+            "surname": surname,
+            "given_names": given_names,
+            "full_name": full_name,
+        }
+
+    @classmethod
+    def generate_driving_license(
+        cls,
+        out_path: str,
+        mode: str = "genuine",
+        surname: str = "REDDY",
+        given_names: str = "KIRAN",
+        state_code: str = "KA",
+        state_name: str = "KARNATAKA",
+        doc_number: str = "KA0320110098765",
+        dob_yymmdd: str = "880210",
+        issue_yymmdd: str = "110320",
+        expiry_yymmdd: str = "310320",
+        face_photo_path: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Creates a synthetic Indian Driving Licence specimen. Like PAN, a DL
+        has no ICAO MRZ -- "DRIVING LICENCE" / "TRANSPORT DEPARTMENT" is
+        what routes OCR to the DL field parser (see ocr_service.py's
+        DL_MARKERS). Unlike Aadhaar/PAN, a DL has a genuine printed expiry
+        ("VALID TILL"), which is what lets DocumentRulesEngine's expiration
+        check (previously MRZ-only) apply to it.
+
+        Modes: 'genuine' (expiry as given) or 'expired' (VALID TILL is
+        overridden to a fixed past date, mirroring how generate_document's
+        own 'expired' mode overrides the passport's expiry field).
+        """
+        w, h = cls.WIDTH, cls.HEIGHT
+        img = Image.new("RGB", (w, h), color=(248, 250, 252))
+        draw = ImageDraw.Draw(img)
+
+        for y in range(0, h, 12):
+            color = (230, 238, 248) if (y // 12) % 2 == 0 else (238, 244, 252)
+            draw.line([(0, y), (w, y)], fill=color, width=1)
+        for x in range(0, w, 24):
+            draw.line([(x, 0), (x, h)], fill=(240, 246, 254), width=1)
+
+        # Header banner
+        draw.rectangle([0, 0, w, 70], fill=(15, 23, 42))
+        draw.rectangle([0, 70, w, 74], fill=(59, 130, 246))
+        draw.text((25, 16), "TRANSPORT DEPARTMENT", fill=(255, 255, 255))
+        draw.text((25, 42), f"GOVT. OF {state_name} • FICTIONAL TEST SPECIMEN", fill=(148, 163, 184))
+        draw.text((w - 220, 25), "DRIVING LICENCE", fill=(203, 213, 225))
+
+        # Photo
+        if face_photo_path:
+            cls._paste_photo(img, face_photo_path, 40, 100, 240, 320)
+            draw.rectangle([40, 100, 40 + 240, 100 + 320], outline=(150, 160, 180), width=2)
+        else:
+            cls._draw_avatar(draw, 40, 100, 240, 320, variant=1)
+
+        full_name = f"{given_names} {surname}".upper()
+        valid_till_display = "01/01/2020" if mode == "expired" else cls._format_yymmdd_display(expiry_yymmdd)
+        fields = [
+            ("DL NO", doc_number),
+            ("NAME", full_name),
+            ("DATE OF BIRTH", cls._format_yymmdd_display(dob_yymmdd)),
+            ("VALID FROM", cls._format_yymmdd_display(issue_yymmdd)),
+            ("VALID TILL", valid_till_display),
+        ]
+
+        label_font = cls._load_font(12)
+        value_font = cls._load_font(18)
+        left_text = 320
+        cur_y = 95
+        for label, val in fields:
+            draw.text((left_text, cur_y), label, fill=(100, 116, 139), font=label_font)
+            draw.text((left_text, cur_y + 18), str(val), fill=(15, 23, 42), font=value_font)
+            cur_y += 48
+
+        draw.ellipse([w - 180, 250, w - 40, 390], outline=(219, 234, 254), width=4)
+        draw.text((w - 165, 310), "SIMULATED\nSPECIMEN", fill=(191, 219, 254))
+
+        img.save(out_path, "JPEG", quality=95)
+
+        return {
+            "image_path": out_path,
+            "mode": mode,
+            "doc_number": doc_number,
+            "surname": surname,
+            "given_names": given_names,
+            "full_name": full_name,
+            "state": state_name,
+        }

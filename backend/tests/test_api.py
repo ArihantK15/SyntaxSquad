@@ -1,4 +1,6 @@
+import uuid
 import pytest
+from unittest.mock import patch
 from fastapi.testclient import TestClient
 from app.main import app
 from app.core.config import settings
@@ -94,6 +96,82 @@ def test_demo_scenario_execution():
         assert "raw_risk" in factor
         assert "weighted_contribution" in factor
 
+def test_pan_card_demo_scenario_runs_clean_through_the_full_pipeline():
+    """
+    A genuine PAN card has no MRZ by design. Before demo.py's MRZ-band OCR
+    pass was gated the same way screening.py's already is, this scenario
+    would have had its bottom band scanned for an MRZ anyway, fabricating
+    one from the card's own boilerplate/signature text whose checksums then
+    "fail" -- corrupting the MRZ risk factor and misclassifying a clean PAN
+    as HIGH/CRITICAL. It must come back LOW, with the new PAN structural
+    check passing and decoding the entity-type letter.
+    """
+    response = client.post("/api/demo/scenario", json={"scenario_key": "pan_card"})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["risk_level"] == "LOW"
+
+    detail = client.get(f"/api/cases/{data['case_id']}").json()
+    assert detail["document_type"] == "PAN"
+    analysis = detail["analyses"][0]
+    assert analysis["ocr_result"]["fields"]["document_type"] == "PAN"
+    assert analysis["mrz_result"] is None
+
+    pan_rule = [r for r in analysis["validation_result"]["rules_detail"] if r["rule"] == "PAN_FORMAT_VALIDATION"][0]
+    assert pan_rule["passed"] is True
+    assert "Individual" in pan_rule["explanation"]
+
+def test_driving_license_expired_demo_scenario_is_flagged_critical():
+    """
+    A Driving Licence has no MRZ either, but it DOES have a genuine printed
+    expiry -- this is the actual value of last session's RULE 2
+    generalization (previously MRZ-only): an expired DL must be caught the
+    same way an expired passport already is. "Document Expired" is a
+    CRITICAL-severity signal, which risk_engine.py's hard-stop floor
+    guarantees classifies at least HIGH regardless of how clean every other
+    factor is (same floor an expired passport gets -- see
+    test_policy_change_actually_changes_a_real_screening_result's use of
+    the "expired" passport scenario).
+    """
+    response = client.post("/api/demo/scenario", json={"scenario_key": "driving_license"})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["risk_level"] in ("HIGH", "CRITICAL")
+
+    detail = client.get(f"/api/cases/{data['case_id']}").json()
+    assert detail["document_type"] == "Driving Licence"
+    analysis = detail["analyses"][0]
+    assert analysis["mrz_result"] is None
+
+    expiry_rule = [r for r in analysis["validation_result"]["rules_detail"] if r["rule"] == "DOCUMENT_EXPIRATION"][0]
+    assert expiry_rule["passed"] is False
+    assert any(s["signal"] == "Document Expired" for s in detail["risk_signals"])
+
+def test_demo_scenario_failure_does_not_leave_a_zombie_case():
+    """
+    The Case row is committed to the DB before the OCR/tamper/face/risk
+    pipeline runs (see app.api.routes.demo.run_demo_scenario). Before the
+    try/except around that pipeline, any failure there -- a missing
+    Tesseract binary, a model load error, anything -- left that case
+    permanently stuck at status="PROCESSING", risk_level="LOW",
+    risk_score=0.0: a zombie that reads exactly like a genuine cleared case
+    in the Review Queue and Cases Archive. A failed run must clean up after
+    itself instead.
+    """
+    from app.core.database import SessionLocal
+    from app.models import Case
+
+    with patch("app.api.routes.demo.get_ocr_service", side_effect=RuntimeError("Simulated OCR engine failure")):
+        with pytest.raises(RuntimeError):
+            client.post("/api/demo/scenario", json={"scenario_key": "genuine"})
+
+    db = SessionLocal()
+    try:
+        stuck = db.query(Case).filter(Case.status == "PROCESSING").count()
+        assert stuck == 0, "A failed demo scenario left a PROCESSING zombie case behind"
+    finally:
+        db.close()
+
 def test_watchlist_evasion_scenario_still_flags_near_miss():
     """
     The 'watchlist_evasion' demo scenario is a document with a valid MRZ, a
@@ -135,7 +213,7 @@ def test_update_policy_rejects_weights_not_summing_to_100():
         "weight_consistency": 0.1, "weight_watchlist": 0.05,
         "threshold_low": 24, "threshold_medium": 49, "threshold_high": 74
     }
-    response = client.post("/api/settings/policy", json=bad_policy)
+    response = client.post("/api/settings/policy", json=bad_policy, headers=OFFICER_AUTH_HEADERS)
     assert response.status_code == 400
     assert "100%" in response.json()["detail"]
 
@@ -145,7 +223,7 @@ def test_update_policy_rejects_non_ascending_thresholds():
         "weight_consistency": 0.10, "weight_watchlist": 0.05,
         "threshold_low": 50, "threshold_medium": 30, "threshold_high": 74
     }
-    response = client.post("/api/settings/policy", json=bad_policy)
+    response = client.post("/api/settings/policy", json=bad_policy, headers=OFFICER_AUTH_HEADERS)
     assert response.status_code == 400
 
 def test_policy_change_actually_changes_a_real_screening_result():
@@ -163,7 +241,7 @@ def test_policy_change_actually_changes_a_real_screening_result():
         "weight_consistency": 0.05, "weight_watchlist": 0.05,
         "threshold_low": 24, "threshold_medium": 49, "threshold_high": 74
     }
-    update_res = client.post("/api/settings/policy", json=new_policy)
+    update_res = client.post("/api/settings/policy", json=new_policy, headers=OFFICER_AUTH_HEADERS)
     assert update_res.status_code == 200
     assert update_res.json()["weight_mrz"] == 0.70
 
@@ -179,7 +257,7 @@ def test_policy_change_actually_changes_a_real_screening_result():
         "weight_mrz": 0.25, "weight_tamper": 0.30, "weight_face": 0.30,
         "weight_consistency": 0.10, "weight_watchlist": 0.05,
         "threshold_low": 24, "threshold_medium": 49, "threshold_high": 74
-    })
+    }, headers=OFFICER_AUTH_HEADERS)
 
 def test_dashboard_requiring_review_kpi_respects_the_configured_low_threshold():
     """
@@ -233,7 +311,7 @@ def test_dashboard_requiring_review_kpi_respects_the_configured_low_threshold():
                 "threshold_medium": threshold_low + 15,
                 "threshold_high": threshold_low + 30,
             }
-            update_res = client.post("/api/settings/policy", json=policy)
+            update_res = client.post("/api/settings/policy", json=policy, headers=OFFICER_AUTH_HEADERS)
             assert update_res.status_code == 200
 
             stats = client.get("/api/dashboard/stats").json()
@@ -254,7 +332,7 @@ def test_dashboard_requiring_review_kpi_respects_the_configured_low_threshold():
             "weight_mrz": 0.25, "weight_tamper": 0.30, "weight_face": 0.30,
             "weight_consistency": 0.10, "weight_watchlist": 0.05,
             "threshold_low": 24, "threshold_medium": 49, "threshold_high": 74
-        })
+        }, headers=OFFICER_AUTH_HEADERS)
         db2 = SessionLocal()
         try:
             db2.query(Case).filter(Case.id == probe_case_id).delete()
@@ -384,6 +462,99 @@ def test_chain_verification_detects_a_block_tampered_and_self_resigned():
     finally:
         db.close()
 
+
+class _FakeAnchorService:
+    """Stands in for Web3BlockchainAnchorService so this API-level test never
+    touches a real network -- the mandatory "mock the chain call for CI"
+    half of this feature's test plan. The real-network half is a manual,
+    one-off run against a live testnet, never part of the automated suite.
+
+    Generates a fresh tx_hash per call (a real anchor service always would
+    too, since it's a new transaction every time) rather than a fixed
+    constant -- this test module reuses one persistent on-disk SQLite DB
+    across separate pytest invocations (see the module-level TestClient
+    setup), and BlockchainAnchor.tx_hash is UNIQUE, so a hardcoded value
+    would collide with a leftover row from a prior run of this same test."""
+
+    def __init__(self, result=None, error=None):
+        self._result = result
+        self._error = error
+        self.anchored_hashes = []
+
+    def anchor(self, head_hash):
+        if self._error:
+            raise self._error
+        self.anchored_hashes.append(head_hash)
+        if self._result:
+            return self._result
+        tx_hash = "0x" + uuid.uuid4().hex + uuid.uuid4().hex[:32]
+        return {
+            "tx_hash": tx_hash,
+            "network": "Ethereum Sepolia",
+            "chain_id": 11155111,
+            "block_number": 999,
+            "explorer_url": f"https://sepolia.etherscan.io/tx/{tx_hash}",
+        }
+
+
+def test_anchor_audit_chain_rejects_unauthenticated_requests(monkeypatch):
+    """Triggers a real (though free) testnet transaction -- gated the same
+    way as case deletion/biometric purge so a bare, credential-free request
+    can't fire it."""
+    fake = _FakeAnchorService()
+    monkeypatch.setattr("app.api.routes.audit.get_blockchain_anchor_service", lambda: fake)
+
+    no_auth_res = client.post("/api/audit/anchor")
+    assert no_auth_res.status_code == 401
+
+    wrong_auth_res = client.post("/api/audit/anchor", headers={"X-API-Key": "definitely-not-the-real-key"})
+    assert wrong_auth_res.status_code == 401
+
+    assert fake.anchored_hashes == []  # rejected requests must never reach the chain call
+
+
+def test_anchor_audit_chain_publishes_the_real_head_hash_and_persists_a_record(monkeypatch):
+    fake = _FakeAnchorService()
+    monkeypatch.setattr("app.api.routes.audit.get_blockchain_anchor_service", lambda: fake)
+
+    verify_before = client.get("/api/audit/verify").json()
+    expected_head_hash = verify_before["head_hash"]
+
+    res = client.post("/api/audit/anchor", headers=OFFICER_AUTH_HEADERS)
+    assert res.status_code == 200
+    data = res.json()
+
+    # The exact hash sent to the chain must be the ledger's real, current
+    # head hash -- not a stale or hardcoded value.
+    assert fake.anchored_hashes == [expected_head_hash]
+    assert data["head_hash"] == expected_head_hash
+    assert data["network"] == "Ethereum Sepolia"
+    assert data["chain_id"] == 11155111
+    assert data["explorer_url"] == f"https://sepolia.etherscan.io/tx/{data['tx_hash']}"
+    assert data["total_records_at_anchor"] == verify_before["total_records"]
+
+    anchors = client.get("/api/audit/anchors").json()
+    assert any(a["id"] == data["id"] for a in anchors)
+
+
+def test_anchor_audit_chain_surfaces_configuration_error_as_503(monkeypatch):
+    from app.services.blockchain_anchor_service import AnchorConfigurationError
+
+    fake = _FakeAnchorService(error=AnchorConfigurationError("ANCHOR_PRIVATE_KEY is not configured"))
+    monkeypatch.setattr("app.api.routes.audit.get_blockchain_anchor_service", lambda: fake)
+
+    res = client.post("/api/audit/anchor", headers=OFFICER_AUTH_HEADERS)
+    assert res.status_code == 503
+
+
+def test_anchor_audit_chain_surfaces_network_failure_as_502(monkeypatch):
+    fake = _FakeAnchorService(error=ConnectionError("could not reach RPC endpoint"))
+    monkeypatch.setattr("app.api.routes.audit.get_blockchain_anchor_service", lambda: fake)
+
+    res = client.post("/api/audit/anchor", headers=OFFICER_AUTH_HEADERS)
+    assert res.status_code == 502
+
+
 def test_biometrics_purge_protocol():
     # Execute a demo scenario to create fresh case
     demo_res = client.post("/api/demo/scenario", json={"scenario_key": "genuine"})
@@ -465,6 +636,62 @@ def test_delete_case_rejects_unauthenticated_requests():
     ok_res = client.delete(f"/api/cases/{case_id}", headers=OFFICER_AUTH_HEADERS)
     assert ok_res.status_code == 200
     assert client.get(f"/api/cases/{case_id}").status_code == 404
+
+def test_update_policy_rejects_unauthenticated_requests():
+    """
+    The risk engine's live weights/thresholds directly control every case's
+    LOW/MEDIUM/HIGH/CRITICAL classification (risk_engine.py reads them
+    straight off the policy row) -- before this fix, POST /settings/policy
+    had no auth check at all, unlike the case-deletion and biometric-purge
+    routes, which already require officer auth for comparable-severity
+    actions. A request with no (or a wrong) X-API-Key must be rejected, and
+    the stored policy must be left untouched.
+    """
+    from app.core.database import SessionLocal
+    from app.services.policy_service import get_policy
+
+    db = SessionLocal()
+    try:
+        before = get_policy(db)
+        before_threshold_low = before.threshold_low
+    finally:
+        db.close()
+
+    hostile_policy = {
+        "weight_mrz": 0.05, "weight_tamper": 0.05, "weight_face": 0.05,
+        "weight_consistency": 0.05, "weight_watchlist": 0.80,
+        "threshold_low": 99, "threshold_medium": 99.5, "threshold_high": 99.9
+    }
+
+    no_auth_res = client.post("/api/settings/policy", json=hostile_policy)
+    assert no_auth_res.status_code == 401
+
+    wrong_auth_res = client.post(
+        "/api/settings/policy",
+        json=hostile_policy,
+        headers={"X-API-Key": "definitely-not-the-real-key"},
+    )
+    assert wrong_auth_res.status_code == 401
+
+    # Confirm the rejected requests didn't actually change the live policy.
+    db = SessionLocal()
+    try:
+        after = get_policy(db)
+        assert after.threshold_low == before_threshold_low
+    finally:
+        db.close()
+
+    # The correct key must still be able to perform the action -- this
+    # isn't rejecting everything indiscriminately.
+    ok_res = client.post("/api/settings/policy", json=hostile_policy, headers=OFFICER_AUTH_HEADERS)
+    assert ok_res.status_code == 200
+
+    # Restore defaults so later tests in this module aren't affected.
+    client.post("/api/settings/policy", json={
+        "weight_mrz": 0.25, "weight_tamper": 0.30, "weight_face": 0.30,
+        "weight_consistency": 0.10, "weight_watchlist": 0.05,
+        "threshold_low": 24, "threshold_medium": 49, "threshold_high": 74
+    }, headers=OFFICER_AUTH_HEADERS)
 
 def test_cors_does_not_reflect_arbitrary_origins():
     """

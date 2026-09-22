@@ -65,6 +65,20 @@ class Settings(BaseSettings):
     # already on PATH.
     TESSERACT_PATH: str = ""
     
+    # Blockchain audit-chain anchoring (Ethereum Sepolia testnet) -- see
+    # app/services/blockchain_anchor_service.py. On-demand only, triggered by
+    # an officer action -- never called from AuditService.log()/verify_chain()'s
+    # hot path, so an RPC outage or a drained faucet wallet can never affect
+    # the core (already-working) local hash-chain audit trail.
+    ANCHOR_RPC_URL: str = "https://ethereum-sepolia-rpc.publicnode.com"
+    ANCHOR_CHAIN_ID: int = 11155111  # Ethereum Sepolia
+    ANCHOR_NETWORK_NAME: str = "Ethereum Sepolia"
+    ANCHOR_EXPLORER_TX_URL: str = "https://sepolia.etherscan.io/tx/"
+    # Throwaway testnet-only wallet key -- holds no real-world value. Empty
+    # by default, which disables the feature (see AnchorConfigurationError)
+    # rather than silently failing on first use.
+    ANCHOR_PRIVATE_KEY: str = ""
+
     # Privacy & Disclaimer
     DISCLAIMER_TEXT: str = (
         "PROTOTYPE SYSTEM — Smart India Hackathon 2026 Demo. "

@@ -266,3 +266,127 @@ def test_extract_text_routes_to_aadhaar_parser_and_tags_document_type(monkeypatc
     assert result["fields"]["document_type"] == "AADHAAR"
     assert result["fields"]["full_name"] == "RAVI KUMAR"
     assert result["fields"]["document_number"] == "123456789012"
+
+
+def test_detect_document_type_recognizes_pan_markers():
+    raw_text = "INCOME TAX DEPARTMENT\nGOVT. OF INDIA\nPermanent Account Number Card\n"
+    assert TesseractOCRService._detect_document_type(raw_text) == "PAN"
+
+
+def test_detect_document_type_recognizes_driving_licence_markers():
+    raw_text = "TRANSPORT DEPARTMENT\nGOVERNMENT OF MAHARASHTRA\nDRIVING LICENCE\n"
+    assert TesseractOCRService._detect_document_type(raw_text) == "DRIVING_LICENSE"
+
+
+def test_extract_pan_number_isolates_valid_pan_format():
+    raw_text = "INCOME TAX DEPARTMENT\nGOVT. OF INDIA\nABCPK1234F\nName\nRAVI KUMAR SHARMA\n"
+    assert svc._extract_pan_number(raw_text) == "ABCPK1234F"
+
+
+def test_extract_pan_number_ignores_non_pan_shaped_tokens():
+    """
+    A 9-digit Aadhaar-shaped or 8-digit passport-shaped number nearby must
+    not be mistaken for a PAN -- the structural anchor (5 letters, 4 digits,
+    1 letter, exactly 10 characters with word boundaries on both sides) is
+    what makes this a real format check rather than a loose "any letters and
+    digits" scan.
+    """
+    raw_text = "INCOME TAX DEPARTMENT\nRef No: AB123456789\nGOVT. OF INDIA\n"
+    assert svc._extract_pan_number(raw_text) is None
+
+
+def test_pan_fields_extract_name_father_name_and_dob():
+    raw_text = (
+        "INCOME TAX DEPARTMENT\n"
+        "GOVT. OF INDIA\n"
+        "Permanent Account Number Card\n"
+        "ABCPK1234F\n"
+        "Name\n"
+        "RAVI KUMAR SHARMA\n"
+        "Father's Name\n"
+        "SURESH KUMAR SHARMA\n"
+        "Date of Birth\n"
+        "15/08/1990\n"
+    )
+    lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
+    fields = svc.parse_pan_fields(raw_text, lines)
+    assert fields["document_number"] == "ABCPK1234F"
+    assert fields["full_name"] == "RAVI KUMAR SHARMA"
+    assert fields["date_of_birth"] == "15/08/1990"
+    assert fields["nationality"] == "INDIA"
+    assert fields["date_of_expiry"] is None  # PAN has no expiry by design
+
+
+def test_extract_text_routes_to_pan_parser_and_tags_document_type(monkeypatch):
+    pan_raw = (
+        "INCOME TAX DEPARTMENT\n"
+        "GOVT. OF INDIA\n"
+        "ABCPK1234F\n"
+        "Name\n"
+        "RAVI KUMAR SHARMA\n"
+        "Father's Name\n"
+        "SURESH KUMAR SHARMA\n"
+        "Date of Birth\n"
+        "15/08/1990\n"
+    )
+    monkeypatch.setattr(svc, "preprocess_image", lambda path: None)
+    monkeypatch.setattr("pytesseract.image_to_data", lambda *a, **k: {"conf": []})
+    monkeypatch.setattr("pytesseract.image_to_string", lambda *a, **k: pan_raw)
+
+    result = svc.extract_text("unused.jpg")
+    assert result["fields"]["document_type"] == "PAN"
+    assert result["fields"]["document_number"] == "ABCPK1234F"
+    assert result["fields"]["full_name"] == "RAVI KUMAR SHARMA"
+
+
+def test_extract_dl_number_normalizes_separators():
+    raw_text = "DRIVING LICENCE\nDL No\nMH-12 2011-0012345\nName\nRAVI KUMAR SHARMA\n"
+    assert svc._extract_dl_number(raw_text) == "MH1220110012345"
+
+
+def test_dl_fields_extract_name_dob_issue_and_expiry():
+    raw_text = (
+        "TRANSPORT DEPARTMENT\n"
+        "GOVERNMENT OF MAHARASHTRA\n"
+        "DRIVING LICENCE\n"
+        "DL No\n"
+        "MH1220110012345\n"
+        "Name\n"
+        "RAVI KUMAR SHARMA\n"
+        "Date of Birth\n"
+        "15/08/1990\n"
+        "Valid From\n"
+        "20/03/2011\n"
+        "Valid Till\n"
+        "20/03/2031\n"
+    )
+    lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
+    fields = svc.parse_dl_fields(raw_text, lines)
+    assert fields["document_number"] == "MH1220110012345"
+    assert fields["full_name"] == "RAVI KUMAR SHARMA"
+    assert fields["date_of_birth"] == "15/08/1990"
+    assert fields["date_of_issue"] == "20/03/2011"
+    assert fields["date_of_expiry"] == "20/03/2031"
+    assert fields["nationality"] == "INDIA"
+
+
+def test_extract_text_routes_to_dl_parser_and_tags_document_type(monkeypatch):
+    dl_raw = (
+        "TRANSPORT DEPARTMENT\n"
+        "GOVERNMENT OF MAHARASHTRA\n"
+        "DRIVING LICENCE\n"
+        "DL No\n"
+        "MH1220110012345\n"
+        "Name\n"
+        "RAVI KUMAR SHARMA\n"
+        "Valid Till\n"
+        "20/03/2031\n"
+    )
+    monkeypatch.setattr(svc, "preprocess_image", lambda path: None)
+    monkeypatch.setattr("pytesseract.image_to_data", lambda *a, **k: {"conf": []})
+    monkeypatch.setattr("pytesseract.image_to_string", lambda *a, **k: dl_raw)
+
+    result = svc.extract_text("unused.jpg")
+    assert result["fields"]["document_type"] == "DRIVING_LICENSE"
+    assert result["fields"]["document_number"] == "MH1220110012345"
+    assert result["fields"]["date_of_expiry"] == "20/03/2031"

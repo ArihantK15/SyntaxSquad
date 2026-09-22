@@ -17,6 +17,8 @@ export const QuickDemoBar: React.FC<QuickDemoBarProps> = ({ onScenarioLoaded }) 
     { key: 'expired', label: '4. Expired Document', desc: 'Expired travel validity, rule engine trigger' },
     { key: 'multiple_anomalies', label: '5. Multiple Anomalies', desc: 'Tampered MRZ + replaced photo + demo watchlist' },
     { key: 'watchlist_evasion', label: '6. Watchlist Evasion Attempt', desc: 'Clean document, but name & number are 1-character off a flagged record' },
+    { key: 'pan_card', label: '7. PAN Card Verification', desc: 'Genuine PAN, structural format check passes, entity type decoded' },
+    { key: 'driving_license', label: '8. Driving Licence — Expired', desc: 'No MRZ, but a genuine printed expiry the rules engine now checks' },
   ];
 
   const handleRun = async () => {
@@ -32,17 +34,17 @@ export const QuickDemoBar: React.FC<QuickDemoBarProps> = ({ onScenarioLoaded }) 
   };
 
   return (
-    <div className="bg-slate-950 border-b border-slate-800/60 px-6 py-1.5 flex flex-wrap items-center gap-3 text-xs">
-      <span className="text-slate-500 shrink-0">Demo scenario:</span>
+    <div className="bg-graphite-950 border-b border-graphite-800/60 px-6 py-1.5 flex flex-wrap items-center gap-3 text-xs">
+      <span className="text-graphite-500 shrink-0">Demo scenario:</span>
 
       <select
         value={selectedScenario}
         onChange={(e) => setSelectedScenario(e.target.value)}
         disabled={loading}
-        className="bg-transparent text-slate-300 border-0 py-0.5 focus:outline-none disabled:opacity-50 cursor-pointer max-w-xs sm:max-w-sm"
+        className="bg-transparent text-graphite-300 border-0 py-0.5 focus:outline-none disabled:opacity-50 cursor-pointer max-w-xs sm:max-w-sm"
       >
         {scenarios.map((sc) => (
-          <option key={sc.key} value={sc.key} className="bg-slate-900">
+          <option key={sc.key} value={sc.key} className="bg-graphite-900">
             {sc.label} — {sc.desc}
           </option>
         ))}
@@ -51,7 +53,7 @@ export const QuickDemoBar: React.FC<QuickDemoBarProps> = ({ onScenarioLoaded }) 
       <button
         onClick={handleRun}
         disabled={loading}
-        className="flex items-center gap-1.5 text-cyan-400 hover:text-cyan-300 font-medium transition-colors disabled:opacity-50 shrink-0 cursor-pointer ml-auto"
+        className="flex items-center gap-1.5 text-brass-400 hover:text-brass-300 font-medium transition-colors disabled:opacity-50 shrink-0 cursor-pointer ml-auto"
       >
         {loading ? (
           <>

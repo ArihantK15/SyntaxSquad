@@ -31,6 +31,21 @@ class ChainVerificationOut(BaseModel):
     reason: Optional[str] = None
 
 
+class BlockchainAnchorOut(BaseModel):
+    id: str
+    head_hash: str
+    total_records_at_anchor: int
+    network: str
+    chain_id: int
+    tx_hash: str
+    block_number: Optional[int] = None
+    explorer_url: str
+    anchored_by: str
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class PurgeBiometricsResponse(BaseModel):
     case_id: str
     message: str
@@ -102,7 +117,7 @@ class ValidationResultOut(BaseModel):
     rules_detail: List[RuleValidationItem]
 
 class TamperSignalItem(BaseModel):
-    type: str # compression_anomaly, edge_discontinuity, photo_boundary_anomaly, font_inconsistency
+    type: str # compression_anomaly, edge_discontinuity, photo_boundary_anomaly, text_compression_anomaly, exif_metadata_missing, exif_editing_software, exif_date_inconsistency
     confidence: float
     region: List[int] = [] # [x, y, w, h]
     explanation: str

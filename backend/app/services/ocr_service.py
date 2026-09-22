@@ -216,20 +216,50 @@ class TesseractOCRService(BaseOCRService):
         "AADHAAR", "UIDAI", "UNIQUE IDENTIFICATION AUTHORITY", "ENROLMENT"
     )
 
+    # PAN cards are issued by the Income Tax Department, not UIDAI -- these
+    # markers are distinct from Aadhaar's and from each other's, so checked
+    # in a fixed order (PAN and DL both say "GOVT. OF INDIA" / state
+    # boilerplate, but only one of the two ever also carries its own
+    # document-specific marker) below in _detect_document_type.
+    PAN_MARKERS = (
+        "INCOME TAX DEPARTMENT", "PERMANENT ACCOUNT NUMBER"
+    )
+
+    # Driving Licences are issued per-state (Transport Department / RTO),
+    # not centrally like PAN/Aadhaar -- "DRIVING LICENCE"/"DRIVING LICENSE"
+    # itself is the one marker guaranteed present regardless of issuing
+    # state.
+    DL_MARKERS = (
+        "DRIVING LICENCE", "DRIVING LICENSE", "TRANSPORT DEPARTMENT"
+    )
+
     @classmethod
     def _detect_document_type(cls, raw_text: str) -> str:
         """
-        Aadhaar cards carry none of the ICAO 9303 furniture (MRZ, French/
-        English bilingual field labels, passport-style document number) the
-        rest of this module's field parser is anchored on -- so field
-        extraction must know up front which label set applies. Defaults to
-        the existing passport-style path when no Aadhaar marker is found,
-        preserving current behavior for the project's own demo specimens.
+        Aadhaar/PAN/Driving Licence cards carry none of the ICAO 9303
+        furniture (MRZ, French/English bilingual field labels, passport-
+        style document number) the passport field parser is anchored on --
+        so field extraction must know up front which label set applies.
+        Checked in a fixed, most-specific-first order since a real card can
+        carry more than one issuer's boilerplate line (e.g. both a PAN and a
+        DL mention "GOVT. OF INDIA" / state government text). Defaults to
+        the existing passport-style path when no marker matches, preserving
+        current behavior for the project's own demo specimens.
         """
         upper = raw_text.upper()
         if any(marker in upper for marker in cls.AADHAAR_MARKERS):
             return "AADHAAR"
+        if any(marker in upper for marker in cls.PAN_MARKERS):
+            return "PAN"
+        if any(marker in upper for marker in cls.DL_MARKERS):
+            return "DRIVING_LICENSE"
         return "PASSPORT"
+
+    # Document types with no ICAO 9303 Machine Readable Zone by design --
+    # shared with screening.py (which skips the MRZ-band OCR pass for these)
+    # and rules_engine.py (which treats a missing MRZ as expected, not a
+    # HIGH-severity "Missing Machine Readable Zone" signal, for these).
+    NON_MRZ_DOCUMENT_TYPES = ("AADHAAR", "PAN", "DRIVING_LICENSE")
 
     @staticmethod
     def _extract_aadhaar_number(raw_text: str) -> Optional[str]:
@@ -320,6 +350,100 @@ class TesseractOCRService(BaseOCRService):
 
         return fields
 
+    @staticmethod
+    def _extract_pan_number(raw_text: str) -> Optional[str]:
+        """
+        A PAN is always exactly 5 letters, 4 digits, then 1 letter (10
+        characters total, e.g. "ABCPK1234F") -- CBDT's published structural
+        format. Word boundaries on both sides keep this from matching a
+        10-character substring embedded inside a longer alphanumeric token
+        (a reference number, a barcode string, etc.).
+        """
+        m = re.search(r'\b([A-Z]{5}[0-9]{4}[A-Z])\b', raw_text.upper())
+        return m.group(1) if m else None
+
+    def parse_pan_fields(self, raw_text: str, lines: List[str]) -> Dict[str, Any]:
+        """
+        Extracts structured fields from a PAN card. Real PAN cards print
+        "Name", "Father's Name", and "Date of Birth" as their own label
+        lines with the value directly beneath -- the same label-above-value
+        layout the passport path's `_value_after_label` already assumes, so
+        it's reused here rather than duplicated.
+        """
+        fields: Dict[str, Any] = {
+            "full_name": None,
+            "document_number": None,
+            "nationality": "INDIA",
+            "country": "INDIA",
+            "date_of_birth": None,
+            "date_of_issue": None,
+            "date_of_expiry": None,  # PAN has no expiry -- it's a lifetime identifier
+            "sex": None
+        }
+
+        fields["document_number"] = self._extract_pan_number(raw_text)
+
+        # A plain \bNAME\b search would also match "Father's Name" -- which
+        # PAN cards print as its own separate label line -- and, since
+        # _value_after_label returns on the first match, silently take the
+        # holder's father's name instead of their own the moment the "Name"
+        # label line itself is missed by OCR. Explicitly skip any line
+        # mentioning "FATHER" rather than relying on label ordering alone.
+        for i, line in enumerate(lines):
+            if (
+                re.search(r'\bNAME\b', line, re.IGNORECASE)
+                and 'FATHER' not in line.upper()
+                and i + 1 < len(lines)
+            ):
+                fields["full_name"] = lines[i + 1].strip()
+                break
+
+        fields["date_of_birth"] = self._extract_date(self._value_after_label(lines, r'\bDATE OF BIRTH\b'))
+
+        return fields
+
+    @staticmethod
+    def _extract_dl_number(raw_text: str) -> Optional[str]:
+        """
+        The nationwide standardized ("Sarathi") Driving Licence number is a
+        2-letter state code, a 2-digit RTO code, a 4-digit issue year, and a
+        7-digit serial -- 15 characters total. Real printouts commonly space
+        or dash-separate each of those groups (e.g. "MH-12 2011-0012345");
+        each boundary is treated as an independently optional separator
+        (matching the Aadhaar number extractor's own `\s?`-per-boundary
+        approach) rather than requiring one consistent style throughout, and
+        the matched groups are re-joined bare so the returned number is
+        always the normalized 15-char form.
+        """
+        m = re.search(r'\b([A-Z]{2})[\s-]?(\d{2})[\s-]?(\d{4})[\s-]?(\d{7})\b', raw_text.upper())
+        return f"{m.group(1)}{m.group(2)}{m.group(3)}{m.group(4)}" if m else None
+
+    def parse_dl_fields(self, raw_text: str, lines: List[str]) -> Dict[str, Any]:
+        """
+        Extracts structured fields from an Indian Driving Licence. Unlike
+        Aadhaar/PAN, a DL carries a genuine printed expiry ("Valid Till") --
+        populating date_of_expiry here is what lets the rules engine's
+        existing expiration check (previously MRZ-only) apply to DLs too.
+        """
+        fields: Dict[str, Any] = {
+            "full_name": None,
+            "document_number": None,
+            "nationality": "INDIA",
+            "country": "INDIA",
+            "date_of_birth": None,
+            "date_of_issue": None,
+            "date_of_expiry": None,
+            "sex": None
+        }
+
+        fields["document_number"] = self._extract_dl_number(raw_text)
+        fields["full_name"] = self._value_after_label(lines, r"\bNAME\b")
+        fields["date_of_birth"] = self._extract_date(self._value_after_label(lines, r'\bDATE OF BIRTH\b'))
+        fields["date_of_issue"] = self._extract_date(self._value_after_label(lines, r'\bVALID FROM\b'))
+        fields["date_of_expiry"] = self._extract_date(self._value_after_label(lines, r'\bVALID TILL\b'))
+
+        return fields
+
     def parse_fields_from_text(self, raw_text: str, lines: List[str]) -> Dict[str, Any]:
         """Extracts structured document fields, anchored on each field's own label line."""
         fields: Dict[str, Any] = {
@@ -385,6 +509,10 @@ class TesseractOCRService(BaseOCRService):
             document_type = self._detect_document_type(raw_text)
             if document_type == "AADHAAR":
                 fields = self.parse_aadhaar_fields(raw_text, lines)
+            elif document_type == "PAN":
+                fields = self.parse_pan_fields(raw_text, lines)
+            elif document_type == "DRIVING_LICENSE":
+                fields = self.parse_dl_fields(raw_text, lines)
             else:
                 fields = self.parse_fields_from_text(raw_text, lines)
             fields["document_type"] = document_type
