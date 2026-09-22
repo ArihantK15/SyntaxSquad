@@ -146,3 +146,42 @@ def test_generate_driving_license_expired_mode_backdates_valid_till(tmp_path):
     assert expiry is not None
     year = int(expiry.split("/")[-1])
     assert year < 2026
+
+
+def test_generate_voter_id_card_produces_a_correctly_sized_specimen(tmp_path):
+    out_path = str(tmp_path / "voter_id.jpg")
+    info = SyntheticDocumentGenerator.generate_voter_id_card(
+        out_path=out_path,
+        surname="NAIR",
+        given_names="ANJALI",
+        doc_number="MLD1234567",
+        dob_yymmdd="970422",
+        sex="FEMALE",
+    )
+    assert os.path.exists(out_path)
+    assert info["doc_number"] == "MLD1234567"
+    img = Image.open(out_path)
+    assert img.size == (SyntheticDocumentGenerator.WIDTH, SyntheticDocumentGenerator.HEIGHT)
+
+
+def test_generate_voter_id_card_is_recognized_by_the_real_ocr_pipeline(tmp_path):
+    """
+    Same Tier B bar as the PAN/DL specimens: it must survive a REAL
+    Tesseract pass, not just look right to a human.
+    """
+    out_path = str(tmp_path / "voter_id.jpg")
+    SyntheticDocumentGenerator.generate_voter_id_card(
+        out_path=out_path,
+        surname="NAIR",
+        given_names="ANJALI",
+        doc_number="MLD1234567",
+        dob_yymmdd="970422",
+        sex="FEMALE",
+    )
+
+    result = TesseractOCRService().extract_text(out_path)
+    assert result["fields"]["document_type"] == "VOTER_ID"
+    assert result["fields"]["document_number"] == "MLD1234567"
+    assert result["fields"]["full_name"] == "ANJALI NAIR"
+    assert result["fields"]["date_of_birth"] == "22/04/1997"
+    assert result["fields"]["sex"] == "F"

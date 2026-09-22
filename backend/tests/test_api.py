@@ -147,6 +147,27 @@ def test_driving_license_expired_demo_scenario_is_flagged_critical():
     assert expiry_rule["passed"] is False
     assert any(s["signal"] == "Document Expired" for s in detail["risk_signals"])
 
+def test_voter_id_demo_scenario_runs_clean_through_the_full_pipeline():
+    """
+    A genuine Voter ID (EPIC) card has no MRZ by design, same as PAN/DL --
+    the MRZ-band OCR pass must be gated for it too, or a fabricated
+    "failed" MRZ checksum would corrupt an otherwise-clean case. It must
+    come back LOW, with the new EPIC structural check passing.
+    """
+    response = client.post("/api/demo/scenario", json={"scenario_key": "voter_id"})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["risk_level"] == "LOW"
+
+    detail = client.get(f"/api/cases/{data['case_id']}").json()
+    assert detail["document_type"] == "Voter ID"
+    analysis = detail["analyses"][0]
+    assert analysis["ocr_result"]["fields"]["document_type"] == "VOTER_ID"
+    assert analysis["mrz_result"] is None
+
+    voter_id_rule = [r for r in analysis["validation_result"]["rules_detail"] if r["rule"] == "VOTER_ID_FORMAT_VALIDATION"][0]
+    assert voter_id_rule["passed"] is True
+
 def test_demo_scenario_failure_does_not_leave_a_zombie_case():
     """
     The Case row is committed to the DB before the OCR/tamper/face/risk

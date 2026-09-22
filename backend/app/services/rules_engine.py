@@ -17,7 +17,7 @@ class DocumentRulesEngine:
     # this codebase's existing style of duplicating the "AADHAAR" check
     # independently at each of its call sites rather than sharing one
     # constant across the OCR and rules-engine modules.
-    NON_MRZ_DOCUMENT_TYPES = ("AADHAAR", "PAN", "DRIVING_LICENSE")
+    NON_MRZ_DOCUMENT_TYPES = ("AADHAAR", "PAN", "DRIVING_LICENSE", "VOTER_ID")
 
     # CBDT's published PAN entity-type codes (the 4th of the 5 leading
     # letters). Only the well-established, commonly-cited codes are listed
@@ -196,6 +196,47 @@ class DocumentRulesEngine:
                         "explanation": f"4th PAN character '{entity_letter}' does not match any documented CBDT entity-type code.",
                         "score_impact": 8.0
                     })
+
+        # RULE 1c: Voter ID (EPIC) Structural Format Validation
+        #
+        # The Election Commission of India's current EPIC format (3 letters,
+        # 7 digits) is publicly documented, so it's genuinely checkable --
+        # but unlike PAN's CBDT-enforced format, EPIC numbering has
+        # well-documented real-world non-conformance (older and non-standard
+        # or duplicate registrations are a known, ECI-acknowledged issue,
+        # most visibly surfaced during the 2025 Special Intensive
+        # Revision). A mismatch is therefore a caution (MEDIUM), not a hard
+        # structural failure the way a malformed PAN is (HIGH) -- flagging
+        # it as HIGH would misclassify genuine older cards as fabricated.
+        # There is no equivalent to PAN's 4th-letter entity-type decode:
+        # the 3 leading letters have no publicly documented decodable
+        # meaning, so none is invented here.
+        if fields.get("document_type") == "VOTER_ID":
+            voter_id_number = fields.get("document_number") or ""
+            if re.fullmatch(r'[A-Z]{3}[0-9]{7}', voter_id_number):
+                results.append({
+                    "rule": "VOTER_ID_FORMAT_VALIDATION",
+                    "passed": True,
+                    "severity": "LOW",
+                    "explanation": f"'{voter_id_number}' matches the ECI's standard EPIC format (3 letters, 7 digits).",
+                    "confidence": 0.90
+                })
+            else:
+                results.append({
+                    "rule": "VOTER_ID_FORMAT_VALIDATION",
+                    "passed": False,
+                    "severity": "MEDIUM",
+                    "explanation": f"'{voter_id_number}' does not match the ECI's standard EPIC format (3 letters, 7 digits). Older or non-standard registrations are known to legitimately deviate, so this is a caution rather than a hard failure.",
+                    "confidence": 0.65
+                })
+                signals.append({
+                    "module": "VALIDATION",
+                    "signal": "Non-Standard EPIC Format",
+                    "severity": "MEDIUM",
+                    "confidence": 0.65,
+                    "explanation": "Voter ID number does not conform to the Election Commission of India's standard 10-character EPIC format.",
+                    "score_impact": 8.0
+                })
 
         # RULE 2: Expiration Check
         expiry_date = None

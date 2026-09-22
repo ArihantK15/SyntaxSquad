@@ -513,3 +513,86 @@ class SyntheticDocumentGenerator:
             "full_name": full_name,
             "state": state_name,
         }
+
+    @classmethod
+    def generate_voter_id_card(
+        cls,
+        out_path: str,
+        mode: str = "genuine",
+        surname: str = "NAIR",
+        given_names: str = "ANJALI",
+        relation_name: str = "SURESH NAIR",
+        doc_number: str = "MLD1234567",
+        dob_yymmdd: str = "970422",
+        sex: str = "FEMALE",
+        face_photo_path: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Creates a synthetic Indian Voter ID (EPIC) specimen. Like PAN/DL, a
+        Voter ID has no ICAO MRZ -- "ELECTION COMMISSION OF INDIA" /
+        "ELECTORS PHOTO IDENTITY CARD" boilerplate drawn below is what
+        routes OCR to the Voter ID field parser (see ocr_service.py's
+        VOTER_ID_MARKERS).
+
+        Modes: 'genuine' only for now -- like PAN, there is no Voter-ID-
+        specific visual tamper scenario wired up yet. RULE 1c's
+        format-mismatch check (rules_engine.py) is exercised directly by
+        hand-authored field dicts in test_rules.py rather than by a
+        corrupted specimen here.
+        """
+        w, h = cls.WIDTH, cls.HEIGHT
+        img = Image.new("RGB", (w, h), color=(248, 250, 252))
+        draw = ImageDraw.Draw(img)
+
+        for y in range(0, h, 12):
+            color = (230, 238, 248) if (y // 12) % 2 == 0 else (238, 244, 252)
+            draw.line([(0, y), (w, y)], fill=color, width=1)
+        for x in range(0, w, 24):
+            draw.line([(x, 0), (x, h)], fill=(240, 246, 254), width=1)
+
+        # Header banner
+        draw.rectangle([0, 0, w, 70], fill=(15, 23, 42))
+        draw.rectangle([0, 70, w, 74], fill=(59, 130, 246))
+        draw.text((25, 16), "ELECTION COMMISSION OF INDIA", fill=(255, 255, 255))
+        draw.text((25, 42), "GOVT. OF INDIA • FICTIONAL TEST SPECIMEN", fill=(148, 163, 184))
+        draw.text((w - 300, 25), "ELECTORS PHOTO IDENTITY CARD", fill=(203, 213, 225))
+
+        # Photo
+        if face_photo_path:
+            cls._paste_photo(img, face_photo_path, 40, 100, 240, 320)
+            draw.rectangle([40, 100, 40 + 240, 100 + 320], outline=(150, 160, 180), width=2)
+        else:
+            cls._draw_avatar(draw, 40, 100, 240, 320, variant=1)
+
+        full_name = f"{given_names} {surname}".upper()
+        fields = [
+            ("EPIC NO", doc_number),
+            ("ELECTOR'S NAME", full_name),
+            ("FATHER'S NAME", relation_name.upper()),
+            ("SEX", sex.upper()),
+            ("DATE OF BIRTH", cls._format_yymmdd_display(dob_yymmdd)),
+        ]
+
+        label_font = cls._load_font(12)
+        value_font = cls._load_font(18)
+        left_text = 320
+        cur_y = 95
+        for label, val in fields:
+            draw.text((left_text, cur_y), label, fill=(100, 116, 139), font=label_font)
+            draw.text((left_text, cur_y + 18), str(val), fill=(15, 23, 42), font=value_font)
+            cur_y += 48
+
+        # Security emblem stamp watermark, matching the passport specimen's own
+        draw.ellipse([w - 180, 250, w - 40, 390], outline=(219, 234, 254), width=4)
+        draw.text((w - 165, 310), "SIMULATED\nSPECIMEN", fill=(191, 219, 254))
+
+        img.save(out_path, "JPEG", quality=95)
+
+        return {
+            "image_path": out_path,
+            "mode": mode,
+            "doc_number": doc_number,
+            "surname": surname,
+            "given_names": given_names,
+            "full_name": full_name,
+        }

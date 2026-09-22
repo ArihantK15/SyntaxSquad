@@ -390,3 +390,73 @@ def test_extract_text_routes_to_dl_parser_and_tags_document_type(monkeypatch):
     assert result["fields"]["document_type"] == "DRIVING_LICENSE"
     assert result["fields"]["document_number"] == "MH1220110012345"
     assert result["fields"]["date_of_expiry"] == "20/03/2031"
+
+
+def test_detect_document_type_recognizes_voter_id_markers():
+    raw_text = "ELECTION COMMISSION OF INDIA\nELECTORS PHOTO IDENTITY CARD\nEPIC NO\nABC1234567\n"
+    assert TesseractOCRService._detect_document_type(raw_text) == "VOTER_ID"
+
+
+def test_extract_voter_id_number_isolates_valid_epic_format():
+    raw_text = "ELECTION COMMISSION OF INDIA\nEPIC NO\nABC1234567\nElector's Name\nANJALI NAIR\n"
+    assert svc._extract_voter_id_number(raw_text) == "ABC1234567"
+
+
+def test_extract_voter_id_number_ignores_non_epic_shaped_tokens():
+    """
+    A PAN-shaped (5 letters + 4 digits + 1 letter) or Aadhaar-shaped
+    (12-digit) number nearby must not be mistaken for an EPIC number -- the
+    structural anchor (exactly 3 letters, then exactly 7 digits, with word
+    boundaries on both sides) is what makes this a real format check rather
+    than a loose "any letters and digits" scan.
+    """
+    raw_text = "ELECTION COMMISSION OF INDIA\nRef No: AB123456789\nEPIC NO\n"
+    assert svc._extract_voter_id_number(raw_text) is None
+
+
+def test_voter_id_fields_extract_name_dob_and_sex_while_skipping_relation_name():
+    raw_text = (
+        "ELECTION COMMISSION OF INDIA\n"
+        "ELECTORS PHOTO IDENTITY CARD\n"
+        "EPIC NO\n"
+        "ABC1234567\n"
+        "Elector's Name\n"
+        "ANJALI NAIR\n"
+        "Father's Name\n"
+        "SURESH NAIR\n"
+        "Sex\n"
+        "FEMALE\n"
+        "Date of Birth\n"
+        "22/04/1997\n"
+    )
+    lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
+    fields = svc.parse_voter_id_fields(raw_text, lines)
+    assert fields["document_number"] == "ABC1234567"
+    assert fields["full_name"] == "ANJALI NAIR"
+    assert fields["date_of_birth"] == "22/04/1997"
+    assert fields["sex"] == "F"
+    assert fields["nationality"] == "INDIA"
+    assert fields["date_of_expiry"] is None  # Voter ID has no expiry by design
+
+
+def test_extract_text_routes_to_voter_id_parser_and_tags_document_type(monkeypatch):
+    voter_id_raw = (
+        "ELECTION COMMISSION OF INDIA\n"
+        "ELECTORS PHOTO IDENTITY CARD\n"
+        "EPIC NO\n"
+        "ABC1234567\n"
+        "Elector's Name\n"
+        "ANJALI NAIR\n"
+        "Sex\n"
+        "FEMALE\n"
+        "Date of Birth\n"
+        "22/04/1997\n"
+    )
+    monkeypatch.setattr(svc, "preprocess_image", lambda path: None)
+    monkeypatch.setattr("pytesseract.image_to_data", lambda *a, **k: {"conf": []})
+    monkeypatch.setattr("pytesseract.image_to_string", lambda *a, **k: voter_id_raw)
+
+    result = svc.extract_text("unused.jpg")
+    assert result["fields"]["document_type"] == "VOTER_ID"
+    assert result["fields"]["document_number"] == "ABC1234567"
+    assert result["fields"]["full_name"] == "ANJALI NAIR"

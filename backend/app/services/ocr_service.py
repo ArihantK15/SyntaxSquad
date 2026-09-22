@@ -233,6 +233,14 @@ class TesseractOCRService(BaseOCRService):
         "DRIVING LICENCE", "DRIVING LICENSE", "TRANSPORT DEPARTMENT"
     )
 
+    # Voter ID (EPIC) cards are issued centrally by the Election Commission
+    # of India, not per-state like a Driving Licence -- "ELECTION COMMISSION
+    # OF INDIA" is present regardless of issuing state, mirroring how
+    # Aadhaar/PAN each have one central-issuer marker.
+    VOTER_ID_MARKERS = (
+        "ELECTION COMMISSION OF INDIA", "ELECTORS PHOTO IDENTITY CARD", "EPIC NO"
+    )
+
     @classmethod
     def _detect_document_type(cls, raw_text: str) -> str:
         """
@@ -253,13 +261,15 @@ class TesseractOCRService(BaseOCRService):
             return "PAN"
         if any(marker in upper for marker in cls.DL_MARKERS):
             return "DRIVING_LICENSE"
+        if any(marker in upper for marker in cls.VOTER_ID_MARKERS):
+            return "VOTER_ID"
         return "PASSPORT"
 
     # Document types with no ICAO 9303 Machine Readable Zone by design --
     # shared with screening.py (which skips the MRZ-band OCR pass for these)
     # and rules_engine.py (which treats a missing MRZ as expected, not a
     # HIGH-severity "Missing Machine Readable Zone" signal, for these).
-    NON_MRZ_DOCUMENT_TYPES = ("AADHAAR", "PAN", "DRIVING_LICENSE")
+    NON_MRZ_DOCUMENT_TYPES = ("AADHAAR", "PAN", "DRIVING_LICENSE", "VOTER_ID")
 
     @staticmethod
     def _extract_aadhaar_number(raw_text: str) -> Optional[str]:
@@ -444,6 +454,62 @@ class TesseractOCRService(BaseOCRService):
 
         return fields
 
+    @staticmethod
+    def _extract_voter_id_number(raw_text: str) -> Optional[str]:
+        """
+        The Election Commission of India's current EPIC number format is 3
+        letters followed by 7 digits (10 characters total) -- distinct from
+        PAN's 5-letters/4-digits/1-letter shape and Aadhaar's 12 bare
+        digits, so word boundaries on both sides are enough to avoid
+        cross-matching either of those on a document that happens to also
+        carry one nearby (e.g. a reference number). Unlike PAN's 4th-letter
+        entity-type code, the 3 letters here have no publicly documented
+        decodable meaning -- they are not decoded or otherwise interpreted.
+        """
+        m = re.search(r'\b([A-Z]{3}[0-9]{7})\b', raw_text.upper())
+        return m.group(1) if m else None
+
+    def parse_voter_id_fields(self, raw_text: str, lines: List[str]) -> Dict[str, Any]:
+        """
+        Extracts structured fields from an Indian Voter ID (EPIC) card. Like
+        PAN, a Voter ID has no genuine expiry -- it's a lifetime identifier.
+        Real cards print the elector's name alongside a relation name
+        (Father's/Husband's/Mother's Name, depending on the elector) as two
+        separate label-above-value blocks; the relation-name line must be
+        excluded the same way PAN's parser excludes "Father's Name" from
+        matching \bNAME\b, since _value_after_label returns on first match.
+        """
+        fields: Dict[str, Any] = {
+            "full_name": None,
+            "document_number": None,
+            "nationality": "INDIA",
+            "country": "INDIA",
+            "date_of_birth": None,
+            "date_of_issue": None,
+            "date_of_expiry": None,  # Voter ID has no expiry -- it's a lifetime identifier
+            "sex": None
+        }
+
+        fields["document_number"] = self._extract_voter_id_number(raw_text)
+
+        for i, line in enumerate(lines):
+            if (
+                re.search(r'\bNAME\b', line, re.IGNORECASE)
+                and not any(k in line.upper() for k in ["FATHER", "HUSBAND", "MOTHER"])
+                and i + 1 < len(lines)
+            ):
+                fields["full_name"] = lines[i + 1].strip()
+                break
+
+        fields["date_of_birth"] = self._extract_date(self._value_after_label(lines, r'\bDATE OF BIRTH\b'))
+
+        gender_match = re.search(r'\b(MALE|FEMALE|THIRD GENDER)\b', raw_text, re.IGNORECASE)
+        if gender_match:
+            gender = gender_match.group(1).upper()
+            fields["sex"] = "M" if gender == "MALE" else ("F" if gender == "FEMALE" else "X")
+
+        return fields
+
     def parse_fields_from_text(self, raw_text: str, lines: List[str]) -> Dict[str, Any]:
         """Extracts structured document fields, anchored on each field's own label line."""
         fields: Dict[str, Any] = {
@@ -513,6 +579,8 @@ class TesseractOCRService(BaseOCRService):
                 fields = self.parse_pan_fields(raw_text, lines)
             elif document_type == "DRIVING_LICENSE":
                 fields = self.parse_dl_fields(raw_text, lines)
+            elif document_type == "VOTER_ID":
+                fields = self.parse_voter_id_fields(raw_text, lines)
             else:
                 fields = self.parse_fields_from_text(raw_text, lines)
             fields["document_type"] = document_type

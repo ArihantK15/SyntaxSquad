@@ -142,6 +142,19 @@ SCENARIO_CONFIGS = {
         "issue": "110320",
         "expiry": "310320",  # overridden to a fixed past date by generate_driving_license's 'expired' mode
         "doc_face_photo": PERSON_A, "live_face_photo": PERSON_A  # same person -> MATCH
+    },
+    "voter_id": {
+        "title": "Voter ID (EPIC) Verification",
+        "mode": "genuine",
+        "document_type": "VOTER_ID",
+        "surname": "NAIR",
+        "given_names": "ANJALI",
+        "relation_name": "SURESH NAIR",
+        "country_name": "INDIA",
+        "doc_number": "MLD1234567",
+        "dob": "970422",
+        "sex": "FEMALE",
+        "doc_face_photo": PERSON_A, "live_face_photo": PERSON_A  # same person -> MATCH
     }
 }
 
@@ -157,6 +170,7 @@ DOCUMENT_TYPE_LABELS = {
     "PASSPORT": "Passport",
     "PAN": "PAN",
     "DRIVING_LICENSE": "Driving Licence",
+    "VOTER_ID": "Voter ID",
 }
 
 @router.post("/scenario")
@@ -204,6 +218,18 @@ def run_demo_scenario(scenario_key: str = Body(..., embed=True), db: Session = D
             dob_yymmdd=cfg["dob"],
             issue_yymmdd=cfg["issue"],
             expiry_yymmdd=cfg["expiry"],
+            face_photo_path=cfg["doc_face_photo"]
+        )
+    elif doc_type == "VOTER_ID":
+        SyntheticDocumentGenerator.generate_voter_id_card(
+            out_path=doc_path,
+            mode=cfg["mode"],
+            surname=cfg["surname"],
+            given_names=cfg["given_names"],
+            relation_name=cfg["relation_name"],
+            doc_number=cfg["doc_number"],
+            dob_yymmdd=cfg["dob"],
+            sex=cfg["sex"],
             face_photo_path=cfg["doc_face_photo"]
         )
     else:

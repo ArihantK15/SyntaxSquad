@@ -293,3 +293,60 @@ def test_dl_valid_expiry_passes():
     expired_rule = [r for r in eval_res["rules_detail"] if r["rule"] == "DOCUMENT_EXPIRATION"][0]
     assert expired_rule["passed"] is True
     assert not any(s["signal"] == "Document Expired" for s in eval_res["signals"])
+
+def test_voter_id_document_not_penalized_for_missing_mrz():
+    """Voter ID (EPIC) cards are an Election Commission of India ID, not an
+    ICAO 9303 travel document -- same MRZ exemption as Aadhaar/PAN/DL."""
+    ocr_data = {
+        "fields": {
+            "full_name": "ANJALI NAIR",
+            "document_number": "ABC1234567",
+            "document_type": "VOTER_ID"
+        }
+    }
+    eval_res = DocumentRulesEngine.evaluate(ocr_data, None)
+    assert not any(s["signal"] == "Missing Machine Readable Zone" for s in eval_res["signals"])
+    mrz_rule = [r for r in eval_res["rules_detail"] if r["rule"] == "MRZ_PRESENCE"][0]
+    assert mrz_rule["passed"] is True
+
+def test_voter_id_format_validation_passes_for_well_formed_epic_number():
+    ocr_data = {
+        "fields": {
+            "full_name": "ANJALI NAIR",
+            "document_number": "ABC1234567",
+            "document_type": "VOTER_ID"
+        }
+    }
+    eval_res = DocumentRulesEngine.evaluate(ocr_data, None)
+    voter_id_rule = [r for r in eval_res["rules_detail"] if r["rule"] == "VOTER_ID_FORMAT_VALIDATION"][0]
+    assert voter_id_rule["passed"] is True
+    assert not any("EPIC" in s["signal"] for s in eval_res["signals"])
+
+def test_voter_id_format_validation_flags_non_standard_structure_as_medium_not_high():
+    """
+    Unlike PAN's CBDT-enforced format (no legitimate exceptions), EPIC
+    numbering has well-documented real-world non-conformance -- older and
+    non-standard/duplicate registrations are a known, ECI-acknowledged
+    issue. A non-conforming EPIC number is therefore a caution (MEDIUM),
+    not a hard structural failure the way a malformed PAN is (HIGH).
+    """
+    ocr_data = {
+        "fields": {
+            "full_name": "ANJALI NAIR",
+            "document_number": "AB123456789",  # wrong shape: 2 letters + 9 digits
+            "document_type": "VOTER_ID"
+        }
+    }
+    eval_res = DocumentRulesEngine.evaluate(ocr_data, None)
+    voter_id_rule = [r for r in eval_res["rules_detail"] if r["rule"] == "VOTER_ID_FORMAT_VALIDATION"][0]
+    assert voter_id_rule["passed"] is False
+    assert voter_id_rule["severity"] == "MEDIUM"
+    signal = [s for s in eval_res["signals"] if s["signal"] == "Non-Standard EPIC Format"][0]
+    assert signal["severity"] == "MEDIUM"
+
+def test_voter_id_rule_skipped_for_non_voter_id_documents():
+    """An EPIC-shaped document number on a passport must not trigger
+    Voter-ID-specific validation -- the rule is gated on document_type."""
+    ocr_data = {"fields": {"document_number": "ABC1234567", "document_type": "PASSPORT"}}
+    eval_res = DocumentRulesEngine.evaluate(ocr_data, None)
+    assert not any(r["rule"] == "VOTER_ID_FORMAT_VALIDATION" for r in eval_res["rules_detail"])

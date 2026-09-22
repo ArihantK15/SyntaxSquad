@@ -19,6 +19,7 @@ export const QuickDemoBar: React.FC<QuickDemoBarProps> = ({ onScenarioLoaded }) 
     { key: 'watchlist_evasion', label: '6. Watchlist Evasion Attempt', desc: 'Clean document, but name & number are 1-character off a flagged record' },
     { key: 'pan_card', label: '7. PAN Card Verification', desc: 'Genuine PAN, structural format check passes, entity type decoded' },
     { key: 'driving_license', label: '8. Driving Licence — Expired', desc: 'No MRZ, but a genuine printed expiry the rules engine now checks' },
+    { key: 'voter_id', label: '9. Voter ID (EPIC) Verification', desc: 'Genuine EPIC, structural format check passes' },
   ];
 
   const handleRun = async () => {
