@@ -12,17 +12,51 @@ import {
 
 const API_BASE = '/api';
 
-// Required (X-API-Key header) for the most sensitive, irreversible or
-// system-wide actions: case deletion, the biometric purge protocol,
-// updating the risk engine's live policy weights/thresholds, and anchoring
-// the audit chain to a public blockchain testnet -- see
-// backend/app/api/deps.py's require_officer_auth for what this does and
-// does not protect against (a minimal gate, not full per-officer auth).
-// Falls back to the backend's own default so the demo works out of the box;
-// override via a VITE_OFFICER_API_KEY build-time env var if the backend's
-// OFFICER_API_KEY is changed from its default.
-const OFFICER_API_KEY =
-  import.meta.env.VITE_OFFICER_API_KEY || 'bordermesh-sih2026-officer-key-change-in-production';
+// Officer-gated actions (case deletion, biometric purge, policy updates,
+// blockchain anchoring -- see backend/app/api/deps.py's require_officer_auth)
+// require an X-API-Key header. This USED TO be a literal key value baked
+// into this file as a hardcoded fallback constant -- meaning the actual
+// secret was always present in plaintext in the built JS bundle, readable
+// by anyone with browser devtools, regardless of whether a build-time
+// override was configured. There is no key-shaped literal anywhere in this
+// module now: the officer enters the password once per browser tab session
+// (sessionStorage, cleared when the tab closes), and it's only ever held in
+// memory/sessionStorage on the client, never in source or the shipped bundle.
+const OFFICER_KEY_STORAGE_KEY = 'bordermesh_officer_key';
+
+function getStoredOfficerKey(): string | null {
+  return sessionStorage.getItem(OFFICER_KEY_STORAGE_KEY);
+}
+
+function promptForOfficerKey(): string | null {
+  const key = window.prompt('Officer authorization required.\n\nEnter the officer password to continue:');
+  if (key) sessionStorage.setItem(OFFICER_KEY_STORAGE_KEY, key);
+  return key;
+}
+
+// Wraps fetch for the 4 officer-gated endpoints: attaches the session's
+// stored key (prompting once if none is stored yet), and on a 401 (missing,
+// wrong, or stale key) clears whatever was stored and prompts exactly once
+// more before giving up -- covers both "never entered a key this session"
+// and "entered a wrong/outdated one" without looping indefinitely.
+async function officerFetch(url: string, options: RequestInit = {}): Promise<Response> {
+  let key = getStoredOfficerKey() ?? promptForOfficerKey();
+  if (!key) throw new Error('Officer authorization is required for this action.');
+
+  const withKey = (k: string): RequestInit => ({
+    ...options,
+    headers: { ...options.headers, 'X-API-Key': k }
+  });
+
+  let res = await fetch(url, withKey(key));
+  if (res.status === 401) {
+    sessionStorage.removeItem(OFFICER_KEY_STORAGE_KEY);
+    key = promptForOfficerKey();
+    if (!key) throw new Error('Officer authorization is required for this action.');
+    res = await fetch(url, withKey(key));
+  }
+  return res;
+}
 
 export const api = {
   async getHealth() {
@@ -89,10 +123,7 @@ export const api = {
   },
 
   async deleteCase(caseId: string): Promise<{ message: string }> {
-    const res = await fetch(`${API_BASE}/cases/${caseId}`, {
-      method: 'DELETE',
-      headers: { 'X-API-Key': OFFICER_API_KEY }
-    });
+    const res = await officerFetch(`${API_BASE}/cases/${caseId}`, { method: 'DELETE' });
     if (!res.ok) throw new Error('Failed to delete case data');
     return res.json();
   },
@@ -104,10 +135,7 @@ export const api = {
     purged_files_count: number;
     audit_hash: string;
   }> {
-    const res = await fetch(`${API_BASE}/cases/${caseId}/purge-biometrics`, {
-      method: 'POST',
-      headers: { 'X-API-Key': OFFICER_API_KEY }
-    });
+    const res = await officerFetch(`${API_BASE}/cases/${caseId}/purge-biometrics`, { method: 'POST' });
     if (!res.ok) throw new Error('Failed to purge case biometrics');
     return res.json();
   },
@@ -152,10 +180,7 @@ export const api = {
   },
 
   async anchorAuditChain(): Promise<BlockchainAnchor> {
-    const res = await fetch(`${API_BASE}/audit/anchor`, {
-      method: 'POST',
-      headers: { 'X-API-Key': OFFICER_API_KEY }
-    });
+    const res = await officerFetch(`${API_BASE}/audit/anchor`, { method: 'POST' });
     if (!res.ok) {
       const body = await res.json().catch(() => null);
       throw new Error(body?.detail || 'Failed to anchor audit chain to testnet');
@@ -262,9 +287,9 @@ export const api = {
   },
 
   async updatePolicy(policy: PolicySettings): Promise<PolicySettings> {
-    const res = await fetch(`${API_BASE}/settings/policy`, {
+    const res = await officerFetch(`${API_BASE}/settings/policy`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-API-Key': OFFICER_API_KEY },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(policy)
     });
     if (!res.ok) {
