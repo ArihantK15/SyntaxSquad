@@ -168,6 +168,30 @@ def test_voter_id_demo_scenario_runs_clean_through_the_full_pipeline():
     voter_id_rule = [r for r in analysis["validation_result"]["rules_detail"] if r["rule"] == "VOTER_ID_FORMAT_VALIDATION"][0]
     assert voter_id_rule["passed"] is True
 
+
+def test_duplicate_identity_demo_scenario_flags_critical_via_gallery_match():
+    """
+    Two entirely different fabricated identities (different name, different
+    passport number) but the SAME underlying live face photo (PERSON_A) --
+    both documents are otherwise clean (valid MRZ, no tamper, a genuine
+    face match on their own document). The only reason this comes back
+    CRITICAL is the cross-case duplicate-identity gallery hit: this real
+    person was already screened once under a different name.
+    """
+    response = client.post("/api/demo/scenario", json={"scenario_key": "duplicate_identity"})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["risk_level"] in ("HIGH", "CRITICAL")
+
+    detail = client.get(f"/api/cases/{data['case_id']}").json()
+    identity_signals = [s for s in detail["risk_signals"] if s["module"] == "IDENTITY"]
+    assert len(identity_signals) == 1
+    assert identity_signals[0]["severity"] == "CRITICAL"
+    assert "Possible Duplicate Identity" in identity_signals[0]["signal"]
+
+    analysis = detail["analyses"][0]
+    assert analysis["face_result"]["status"] == "MATCH"  # clean on its own document
+
 def test_demo_scenario_failure_does_not_leave_a_zombie_case():
     """
     The Case row is committed to the DB before the OCR/tamper/face/risk
@@ -599,6 +623,61 @@ def test_biometrics_purge_protocol():
     assert cdata["biometrics_purged"] is True
     assert cdata["analyses"][0]["biometrics_purged"] is True
     assert cdata["analyses"][0]["document_image_path"] == "[PURGED_PRIVACY_COMPLIANCE]"
+
+def test_biometrics_purge_deletes_the_face_embedding_gallery_entry():
+    """
+    A stored gallery embedding IS raw biometric data -- arguably more
+    sensitive than the photo it came from, since it's already in matchable
+    form -- so the purge protocol must delete it outright, not just leave
+    it sitting in the gallery where it could still match a future
+    screening after the case's own biometrics are supposedly gone.
+    """
+    from app.core.database import SessionLocal
+    from app.models import FaceEmbeddingGallery
+
+    demo_res = client.post("/api/demo/scenario", json={"scenario_key": "duplicate_identity"})
+    assert demo_res.status_code == 200
+    case_id = demo_res.json()["case_id"]
+
+    db = SessionLocal()
+    try:
+        assert db.query(FaceEmbeddingGallery).filter(FaceEmbeddingGallery.case_id == case_id).count() == 1
+    finally:
+        db.close()
+
+    purge_res = client.post(f"/api/cases/{case_id}/purge-biometrics", headers=OFFICER_AUTH_HEADERS)
+    assert purge_res.status_code == 200
+
+    db = SessionLocal()
+    try:
+        assert db.query(FaceEmbeddingGallery).filter(FaceEmbeddingGallery.case_id == case_id).count() == 0
+    finally:
+        db.close()
+
+
+def test_delete_case_cascades_to_the_face_embedding_gallery_entry():
+    from app.core.database import SessionLocal
+    from app.models import FaceEmbeddingGallery
+
+    demo_res = client.post("/api/demo/scenario", json={"scenario_key": "duplicate_identity"})
+    assert demo_res.status_code == 200
+    case_id = demo_res.json()["case_id"]
+
+    db = SessionLocal()
+    try:
+        assert db.query(FaceEmbeddingGallery).filter(FaceEmbeddingGallery.case_id == case_id).count() == 1
+    finally:
+        db.close()
+
+    delete_res = client.delete(f"/api/cases/{case_id}", headers=OFFICER_AUTH_HEADERS)
+    assert delete_res.status_code == 200
+
+    db = SessionLocal()
+    try:
+        assert db.query(FaceEmbeddingGallery).filter(FaceEmbeddingGallery.case_id == case_id).count() == 0
+    finally:
+        db.close()
+
 
 def test_purge_biometrics_rejects_unauthenticated_requests():
     """

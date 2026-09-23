@@ -113,7 +113,8 @@ class RiskEngine:
         validation_data: Dict[str, Any],
         tamper_data: Dict[str, Any],
         face_data: Optional[Dict[str, Any]],
-        watchlist_match: Optional[Dict[str, Any]]
+        watchlist_match: Optional[Dict[str, Any]],
+        duplicate_identity_match: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         all_signals: List[Dict[str, Any]] = []
 
@@ -245,6 +246,36 @@ class RiskEngine:
             all_signals.append(signal_entry)
             watchlist_signals_list.append(signal_entry["signal"])
         watchlist_contrib = round(watchlist_raw_risk * self.w_watchlist, 1)
+
+        # --- 6. Cross-Case Duplicate Identity Check (CRITICAL flag only, no weight) ---
+        #
+        # A gallery hit (see identity_gallery_service.py) means this
+        # screening's live face closely matches a PREVIOUS case filed under
+        # a different name/document -- a real, named identity-fraud signal,
+        # not a probabilistic risk. Modeled purely as a CRITICAL-severity
+        # signal that rides the SAME hard-stop floor an expired document or
+        # watchlist hit already uses, deliberately without its own weighted
+        # factor: adding one would need a new PolicySettings column, and
+        # this app has no migration tooling (Base.metadata.create_all only
+        # creates missing tables, it won't alter an existing populated
+        # one). The floor mechanism alone is sufficient to guarantee at
+        # least HIGH regardless of how clean every other factor is.
+        if duplicate_identity_match:
+            matched_case_number = duplicate_identity_match["case_number"]
+            similarity = duplicate_identity_match.get("similarity", 0.0)
+            all_signals.append({
+                "module": "IDENTITY",
+                "signal": f"Possible Duplicate Identity: matches Case {matched_case_number}",
+                "severity": "CRITICAL",
+                "confidence": round(similarity, 2),
+                "explanation": (
+                    f"This individual's live facial biometric closely matches a PREVIOUS "
+                    f"screening (Case {matched_case_number}), filed under a different name "
+                    f"or document number. Similarity: {round(similarity * 100, 1)}%. "
+                    f"Requires officer identity review."
+                ),
+                "score_impact": 30.0
+            })
 
         # Total Aggregated Score (0 to 100)
         total_risk = round(mrz_contrib + tamper_contrib + face_contrib + consistency_contrib + watchlist_contrib, 1)

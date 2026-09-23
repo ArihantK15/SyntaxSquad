@@ -30,6 +30,7 @@ class Case(Base):
     analyses = relationship("DocumentAnalysis", back_populates="case", cascade="all, delete-orphan")
     risk_signals = relationship("RiskSignal", back_populates="case", cascade="all, delete-orphan")
     audit_logs = relationship("AuditLog", back_populates="case", cascade="all, delete-orphan")
+    gallery_entries = relationship("FaceEmbeddingGallery", back_populates="case", cascade="all, delete-orphan")
 
 
 class DocumentAnalysis(Base):
@@ -116,6 +117,38 @@ class BlockchainAnchor(Base):
     explorer_url = Column(String(255), nullable=False)
     anchored_by = Column(String(128), default="OFFICER-DEMO-01")
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class FaceEmbeddingGallery(Base):
+    """
+    Best-effort 1:N cross-case face-embedding gallery for duplicate-identity
+    detection (see identity_gallery_service.py) -- built from each
+    screening's LIVE facial capture (the actual physically-present person),
+    not the document photo, since the question this answers is "has this
+    real person been screened before under a different claimed identity."
+
+    Denormalizes case_number/full_name/document_number_hash rather than
+    joining back to Case/DocumentAnalysis on every 1:N lookup -- this table
+    exists purely to be scanned on every new screening, and these are
+    exactly the values a matched signal needs to display.
+
+    Deleted (not anonymized) on both the biometric purge endpoint and full
+    case deletion -- a stored embedding IS raw biometric data, arguably
+    more sensitive than the photo it was derived from since it's already
+    in matchable form, so it gets the same privacy-by-design treatment as
+    every other biometric artifact in this app.
+    """
+    __tablename__ = "face_embedding_gallery"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    case_id = Column(String(36), ForeignKey("cases.id", ondelete="CASCADE"), nullable=False, index=True)
+    case_number = Column(String(32), nullable=False)
+    full_name = Column(String(255), nullable=True)
+    document_number_hash = Column(String(64), nullable=True)
+    embedding = Column(JSON, nullable=False)  # 512-d L2-normalized VGGFace2 embedding
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    case = relationship("Case", back_populates="gallery_entries")
 
 
 class PolicySettings(Base):

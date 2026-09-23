@@ -18,6 +18,7 @@ from app.services.rules_engine import DocumentRulesEngine
 from app.services.tamper_service import get_tamper_service
 from app.services.face_service import get_face_service
 from app.services.watchlist_service import get_watchlist_provider
+from app.services.identity_gallery_service import IdentityGalleryService
 from app.services.risk_engine import get_risk_engine
 from app.services.policy_service import get_policy
 from app.services.audit_service import AuditService
@@ -155,7 +156,43 @@ SCENARIO_CONFIGS = {
         "dob": "970422",
         "sex": "FEMALE",
         "doc_face_photo": PERSON_A, "live_face_photo": PERSON_A  # same person -> MATCH
+    },
+    "duplicate_identity": {
+        "title": "Duplicate Identity Detection",
+        "mode": "genuine",
+        "surname": "RAO",
+        "given_names": "DEEPAK",
+        "country_code": "UTO",
+        "country_name": "REPUBLIC OF UTOPIA",
+        "doc_number": "P9981234",
+        "nationality": "UTOPIAN",
+        "dob": "910815",
+        "expiry": "300101",
+        # Same live face as _DUPLICATE_IDENTITY_PRIOR_CONFIG below (PERSON_A)
+        # -- a genuinely different, unrelated name and passport number, but
+        # the SAME real underlying person. Everything about THIS document
+        # is individually clean (valid MRZ, no tamper, a genuine face match
+        # on its own document) -- only the cross-case gallery lookup catches it.
+        "doc_face_photo": PERSON_A, "live_face_photo": PERSON_A
     }
+}
+
+# Seeded automatically before "duplicate_identity" runs (see run_demo_scenario)
+# so its gallery lookup has a genuine prior screening -- under a different
+# name and passport number, but the same PERSON_A live face -- to match
+# against. Not itself a user-selectable scenario key.
+_DUPLICATE_IDENTITY_PRIOR_CONFIG = {
+    "title": "Duplicate Identity Detection (Prior Screening)",
+    "mode": "genuine",
+    "surname": "MEHTA",
+    "given_names": "SUNIL",
+    "country_code": "UTO",
+    "country_name": "REPUBLIC OF UTOPIA",
+    "doc_number": "P7723456",
+    "nationality": "UTOPIAN",
+    "dob": "890210",
+    "expiry": "300101",
+    "doc_face_photo": PERSON_A, "live_face_photo": PERSON_A
 }
 
 # Case.document_type / DocumentAnalysis.document_type display labels, keyed
@@ -184,7 +221,25 @@ def run_demo_scenario(scenario_key: str = Body(..., embed=True), db: Session = D
     if key not in SCENARIO_CONFIGS:
         raise HTTPException(status_code=400, detail=f"Unknown scenario '{scenario_key}'. Valid: {list(SCENARIO_CONFIGS.keys())}")
 
-    cfg = SCENARIO_CONFIGS[key]
+    if key == "duplicate_identity":
+        # Seed a prior screening under a different identity, same real
+        # face, so this scenario's own gallery lookup has something to
+        # match -- run and discarded; only the actual scenario's result
+        # (below) is returned to the caller. check_duplicate_identity=True
+        # on BOTH calls: every other demo scenario also reuses PERSON_A as
+        # its live face purely because a hand-drawn avatar isn't detectable
+        # as a face at all (see demo_faces.py) -- checking the gallery for
+        # those too would make them spuriously "match" each other and every
+        # prior run of this very scenario. Scoping the gallery check to only
+        # this scenario pair keeps that stock-photo reuse from being
+        # mistaken for a real duplicate signal.
+        _execute_scenario(_DUPLICATE_IDENTITY_PRIOR_CONFIG, db, check_duplicate_identity=True)
+        return _execute_scenario(SCENARIO_CONFIGS[key], db, check_duplicate_identity=True)
+
+    return _execute_scenario(SCENARIO_CONFIGS[key], db)
+
+
+def _execute_scenario(cfg: Dict[str, Any], db: Session, check_duplicate_identity: bool = False) -> Dict[str, Any]:
     case_uid = str(uuid.uuid4())
 
     # Specimen filenames are keyed on case_uid (a full UUID4, already
@@ -328,10 +383,33 @@ def run_demo_scenario(scenario_key: str = Body(..., embed=True), db: Session = D
         face_result = face_svc.verify(doc_path, live_path, case_uid)
         AuditService.log(db, "FACE_VERIFIED", case_uid, actor="AI-FACE-VERIFIER")
 
-        # Step 6: Watchlist & Risk Engine
+        # Step 6: Watchlist, Duplicate Identity & Risk Engine
         full_name = f"{cfg['surname']} {cfg['given_names']}"
         watchlist_provider = get_watchlist_provider()
         watchlist_match = watchlist_provider.check_watchlist(full_name, cfg["doc_number"])
+
+        # Cross-Case Duplicate Identity Check -- see screening.py's manual-
+        # upload equivalent for the same live_embedding/gallery contract.
+        # Gated on check_duplicate_identity: every OTHER demo scenario also
+        # reuses PERSON_A as its live face (a hand-drawn avatar isn't
+        # detectable as a face at all -- see demo_faces.py), so checking
+        # the gallery for those too would flag them as spurious duplicates
+        # of each other and of past runs of this scenario itself.
+        duplicate_identity_match = None
+        if check_duplicate_identity:
+            live_embedding = face_result.get("live_embedding")
+            if live_embedding:
+                duplicate_identity_match = IdentityGalleryService.find_gallery_match(
+                    db, embedding=live_embedding, exclude_case_id=case_uid
+                )
+                IdentityGalleryService.store_gallery_embedding(
+                    db,
+                    case_id=case_uid,
+                    case_number=case_num,
+                    full_name=full_name,
+                    document_number_hash=hash_identifier(cfg["doc_number"]),
+                    embedding=live_embedding
+                )
 
         risk_engine = get_risk_engine(get_policy(db))
         risk_res = risk_engine.calculate(
@@ -339,7 +417,8 @@ def run_demo_scenario(scenario_key: str = Body(..., embed=True), db: Session = D
             validation_data=validation_data,
             tamper_data=tamper_result,
             face_data=face_result,
-            watchlist_match=watchlist_match
+            watchlist_match=watchlist_match,
+            duplicate_identity_match=duplicate_identity_match
         )
 
         total_processing_ms = (time.perf_counter() - step_start) * 1000.0

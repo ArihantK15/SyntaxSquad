@@ -16,6 +16,7 @@ from app.services.rules_engine import DocumentRulesEngine
 from app.services.tamper_service import get_tamper_service
 from app.services.face_service import get_face_service
 from app.services.watchlist_service import get_watchlist_provider
+from app.services.identity_gallery_service import IdentityGalleryService
 from app.services.risk_engine import get_risk_engine
 from app.services.policy_service import get_policy
 from app.services.audit_service import AuditService
@@ -368,17 +369,40 @@ def process_risk_aggregation(case_id: str, db: Session = Depends(get_db)):
     doc_no = mrz_data.get("document_number") or ocr_data.get("fields", {}).get("document_number")
     watchlist_match = watchlist_provider.check_watchlist(full_name, doc_no)
 
-    # 2. Risk Engine Evaluation
+    # 2. Cross-Case Duplicate Identity Check
+    #
+    # face_result's live_embedding (see face_service.py) is only present
+    # when a live face was actually detected and embedded -- absent for
+    # NO_FACE_DETECTED/MULTIPLE_FACES, which already carry their own
+    # signals and have nothing to search the gallery with anyway.
+    face_result = analysis.face_result or {}
+    live_embedding = face_result.get("live_embedding")
+    duplicate_identity_match = None
+    if live_embedding:
+        duplicate_identity_match = IdentityGalleryService.find_gallery_match(
+            db, embedding=live_embedding, exclude_case_id=case_id
+        )
+        IdentityGalleryService.store_gallery_embedding(
+            db,
+            case_id=case_id,
+            case_number=case.case_number,
+            full_name=full_name,
+            document_number_hash=case.document_number_hash,
+            embedding=live_embedding
+        )
+
+    # 3. Risk Engine Evaluation
     risk_engine = get_risk_engine(get_policy(db))
     risk_res = risk_engine.calculate(
         mrz_data=analysis.mrz_result,
         validation_data=analysis.validation_result or {},
         tamper_data=analysis.tamper_result or {},
         face_data=analysis.face_result,
-        watchlist_match=watchlist_match
+        watchlist_match=watchlist_match,
+        duplicate_identity_match=duplicate_identity_match
     )
 
-    # 3. Update Case
+    # 4. Update Case
     case.risk_score = risk_res["risk_score"]
     case.risk_level = risk_res["risk_level"]
     case.recommendation = risk_res["recommendation"]

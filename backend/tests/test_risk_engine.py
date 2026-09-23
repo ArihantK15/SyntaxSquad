@@ -216,3 +216,59 @@ def test_risk_engine_missing_mrz_dates_never_discounts_face_weight():
     )
     face_entry = next(b for b in result["breakdown"] if b["factor"] == "Biometric Face Verification")
     assert face_entry["weight"] == engine.w_face
+
+
+def test_risk_engine_duplicate_identity_match_floors_to_critical_via_existing_mechanism():
+    """
+    A cross-case duplicate-identity gallery hit (see identity_gallery_service.py)
+    is modeled as a CRITICAL-severity signal under a new "IDENTITY" module --
+    deliberately reusing the SAME hard-stop floor mechanism a watchlist hit or
+    an expired document already uses, rather than adding a new weighted
+    factor (which would need a PolicySettings schema migration). It must
+    floor an otherwise entirely clean screening to at least HIGH.
+    """
+    engine = RiskEngine()
+    validation_data = {"passed_count": 5, "failed_count": 0, "signals": []}
+    tamper_data = {"tamper_risk": 0.05, "signals": []}
+    face_data = {"similarity": 0.95, "status": "MATCH", "signals": []}
+    duplicate_identity_match = {
+        "case_id": "prior-case-uuid",
+        "case_number": "BM-2026-PRIOR",
+        "full_name": "SUNIL MEHTA",
+        "similarity": 0.97
+    }
+
+    result = engine.calculate(
+        mrz_data={"is_valid": True},
+        validation_data=validation_data,
+        tamper_data=tamper_data,
+        face_data=face_data,
+        watchlist_match=None,
+        duplicate_identity_match=duplicate_identity_match
+    )
+
+    identity_signals = [s for s in result["signals"] if s["module"] == "IDENTITY"]
+    assert len(identity_signals) == 1
+    assert identity_signals[0]["severity"] == "CRITICAL"
+    assert "BM-2026-PRIOR" in identity_signals[0]["signal"]
+    assert result["critical_floor_applied"] is True
+    assert result["risk_level"] in ("HIGH", "CRITICAL")
+
+
+def test_risk_engine_no_duplicate_identity_match_emits_no_identity_signal():
+    engine = RiskEngine()
+    validation_data = {"passed_count": 5, "failed_count": 0, "signals": []}
+    tamper_data = {"tamper_risk": 0.05, "signals": []}
+    face_data = {"similarity": 0.95, "status": "MATCH", "signals": []}
+
+    result = engine.calculate(
+        mrz_data={"is_valid": True},
+        validation_data=validation_data,
+        tamper_data=tamper_data,
+        face_data=face_data,
+        watchlist_match=None,
+        duplicate_identity_match=None
+    )
+
+    assert not any(s["module"] == "IDENTITY" for s in result["signals"])
+    assert result["risk_level"] == "LOW"

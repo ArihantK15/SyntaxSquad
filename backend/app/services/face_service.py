@@ -232,7 +232,14 @@ class FaceVerificationService(BaseFaceService):
             "quality_checks": quality,
             "anti_spoofing_score": quality.get("liveness_score", 0.95),
             "match_threshold": self.MATCH_THRESHOLD,
-            "signals": signals
+            "signals": signals,
+            # The live capture's own embedding -- feeds the cross-case
+            # duplicate-identity gallery (identity_gallery_service.py). Only
+            # ever the LIVE embedding, never the document photo's: the
+            # question that answers is "has this real, physically-present
+            # person been screened before under a different claimed
+            # identity," not anything about the printed document photo.
+            "live_embedding": emb_live.tolist() if emb_live is not None else None
         }
 
 def get_face_service() -> BaseFaceService:

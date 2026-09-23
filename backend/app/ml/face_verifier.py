@@ -138,8 +138,15 @@ class FaceDetectorAndVerifier:
             emb = self.embedder(tensor.to(self.device))
         return emb.squeeze(0).cpu().numpy()
 
-    def compare_faces(self, emb1: Optional[np.ndarray], emb2: Optional[np.ndarray]) -> float:
-        """Cosine similarity between two face embeddings, mapped to 0..1."""
+    @staticmethod
+    def compare_faces(emb1: Optional[np.ndarray], emb2: Optional[np.ndarray]) -> float:
+        """
+        Cosine similarity between two face embeddings, mapped to 0..1. A
+        staticmethod (not just called as one) so callers -- e.g.
+        identity_gallery_service.py's 1:N gallery search -- can reuse this
+        exact comparison without instantiating FaceDetectorAndVerifier and
+        loading its MTCNN/InceptionResnetV1 models just for a numpy op.
+        """
         if emb1 is None or emb2 is None:
             return 0.0
         norm1, norm2 = np.linalg.norm(emb1), np.linalg.norm(emb2)

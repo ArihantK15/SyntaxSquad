@@ -5,7 +5,7 @@ from sqlalchemy import desc
 from typing import Optional, List
 
 from app.api.deps import get_db, require_officer_auth
-from app.models import Case, DocumentAnalysis, RiskSignal, AuditLog
+from app.models import Case, DocumentAnalysis, RiskSignal, AuditLog, FaceEmbeddingGallery
 from app.schemas import CaseOut, CaseDetailOut, OfficerDecisionRequest, RiskSignalOut, AuditLogOut, PurgeBiometricsResponse
 from app.services.audit_service import AuditService
 
@@ -145,6 +145,14 @@ def purge_case_biometrics(case_id: str, db: Session = Depends(get_db), _auth: No
                 purged_files_count += 1
             except Exception:
                 pass
+
+    # A gallery embedding (see identity_gallery_service.py) IS raw
+    # biometric data -- arguably more sensitive than the photo it came
+    # from, since it's already in matchable form -- so it's deleted
+    # outright here, not just anonymized like the analysis rows above.
+    # Otherwise it would keep matching future screenings after the case's
+    # own biometrics are supposedly purged.
+    db.query(FaceEmbeddingGallery).filter(FaceEmbeddingGallery.case_id == case_id).delete()
 
     case.biometrics_purged = True
     db.commit()
