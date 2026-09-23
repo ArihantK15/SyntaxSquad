@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+import pytesseract
 import pytest
 from PIL import Image
 
@@ -63,6 +64,126 @@ def test_deskew_recovers_a_valid_mrz_from_a_rotated_document(tmp_path):
     result = MRZService.parse_pre_isolated_lines(mrz_lines) if len(mrz_lines) >= 2 else None
     assert result is not None
     assert result["is_valid"] is True
+
+
+def test_extract_mrz_lines_degrades_to_empty_list_on_tesseract_engine_failure(tmp_path, monkeypatch):
+    """
+    Reproduces a real deployment gap: extract_mrz_lines had no exception
+    handling around its pytesseract call, unlike extract_text's own
+    try/except -- a missing/misconfigured Tesseract binary
+    (TesseractNotFoundError) or any other OCR engine failure propagated
+    straight up through screening.py/demo.py uncaught, crashing the whole
+    screening request instead of degrading. It must instead return [] on
+    any OCR engine failure, exactly like the existing "unreadable image" /
+    "empty crop" cases already do -- so the caller's existing missing-MRZ
+    handling (rules_engine.py RULE 1's "elif not mrz_data" branch) routes
+    the case to review instead of crashing outright.
+    """
+    doc_path = str(tmp_path / "genuine.jpg")
+    SyntheticDocumentGenerator.generate_document(doc_path, mode="genuine")
+
+    def _boom(*args, **kwargs):
+        raise pytesseract.TesseractNotFoundError()
+
+    monkeypatch.setattr("pytesseract.image_to_string", _boom)
+
+    assert svc.extract_mrz_lines(doc_path) == []
+
+
+def test_extract_text_uses_single_column_page_segmentation(monkeypatch):
+    """
+    Reproduces a real failure found by running an actual photographed
+    Aadhaar card (not a synthetic specimen) through the live pipeline:
+    Tesseract's default automatic page segmentation (PSM 3) produced
+    near-total garbage on that real, denser, mixed-script/QR-code layout
+    (OSD orientation/script confidence near zero), while explicitly
+    forcing PSM 4 (already used by extract_mrz_lines for the same reason)
+    recovered the document almost completely -- confirmed byte-for-byte
+    identical output to the old default on every synthetic specimen
+    tested, so this is a real-document robustness fix with no observed
+    synthetic-path regression risk. Asserted here as "the config passed to
+    Tesseract requests single-column segmentation" rather than depending
+    on a real Tesseract install being present in every test environment.
+    """
+    captured_config = {}
+
+    def _capture(image, config="", **kwargs):
+        captured_config["value"] = config
+        return ""
+
+    monkeypatch.setattr(svc, "preprocess_image", lambda path: None)
+    monkeypatch.setattr("pytesseract.image_to_data", lambda *a, **k: {"conf": []})
+    monkeypatch.setattr("pytesseract.image_to_string", _capture)
+
+    svc.extract_text("unused.jpg")
+
+    assert "--psm 4" in captured_config["value"]
+
+
+def test_extract_date_rejects_an_implausible_year_from_incidental_digit_runs():
+    """
+    Reproduces a real failure observed on an actual Aadhaar photo: DOB
+    label-matching (see parse_aadhaar_fields) fell through to an unrelated
+    line containing a 6-digit PIN code ("PIN Code: 560039"), and the
+    separator-tolerant date regex happily assembled "05/06/0039" out of
+    it -- syntactically date-shaped but an impossible birth/issue/expiry
+    year. A real date's 4-digit year must fall within a plausible range.
+    """
+    assert svc._extract_date("PIN Code: 560039 DOB is based on...") is None
+
+
+def test_aadhaar_dob_skips_a_labeled_line_with_no_real_date_and_keeps_searching():
+    """
+    Reproduces a real failure observed on an actual Aadhaar photo: the
+    card's own generic informational disclaimer text ("...not of
+    citizenship or date of birth (DOB)...") mentions the word "DOB" before
+    the holder's own labeled DOB field appears further down the page. The
+    old code committed to the FIRST line matching \\bDOB\\b and its
+    immediate next line unconditionally, landing on an unrelated PIN-code
+    line with no real date on it at all instead of continuing to search
+    for a line that actually contains one.
+    """
+    raw_text = (
+        "Government of India\n"
+        "RAVI KUMAR\n"
+        "Aadhaar is proof of identity, not of citizenship or date of birth (DOB).\n"
+        "PIN Code: 560039 DOB is based on information supported by proof of DOB document\n"
+        "Sex) DOB: 15/08/1990\n"
+        "MALE\n"
+    )
+    lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
+    fields = svc.parse_aadhaar_fields(raw_text, lines)
+    assert fields["date_of_birth"] == "15/08/1990"
+
+
+def test_aadhaar_full_name_rejects_a_single_garbled_ocr_token():
+    """
+    Reproduces a real failure observed on an actual (unusually noisy)
+    Aadhaar capture: a single OCR-garbled token from unrelated boilerplate/
+    watermark text ("cendaiead.") happened to fullmatch the letters-only
+    name-shaped pattern and won as the "name" before the real, correctly-
+    read "Sharaj R Shetty" line was ever reached. A real printed name is
+    virtually always multiple space-separated words, so requiring at least
+    two tokens rejects this whole class of single-word OCR garbage without
+    needing to know anything about what the garbage actually says.
+
+    Note: this does NOT fix every real-world full_name failure -- a
+    multi-word garbled fragment that also happens to dodge the boilerplate
+    keyword exclusion list (e.g. "Unique" OCR'd as "Unaque") can still win.
+    That residual gap is real and not addressed here; this test covers the
+    specific single-token failure mode observed and fixed.
+    """
+    raw_text = (
+        "Government of India\n"
+        "cendaiead.\n"
+        "Unique Identification Authority of India\n"
+        "Sharaj R Shetty\n"
+        "DOB: 30/07/2007\n"
+        "MALE\n"
+    )
+    lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
+    fields = svc.parse_aadhaar_fields(raw_text, lines)
+    assert fields["full_name"] == "Sharaj R Shetty"
 
 
 def test_full_name_survives_garbled_label():

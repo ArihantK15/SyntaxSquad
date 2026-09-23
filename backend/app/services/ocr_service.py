@@ -163,7 +163,18 @@ class TesseractOCRService(BaseOCRService):
         mrz_config = (
             "--psm 4 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789<"
         )
-        raw = pytesseract.image_to_string(padded, config=mrz_config)
+        try:
+            raw = pytesseract.image_to_string(padded, config=mrz_config)
+        except Exception:
+            # Mirrors extract_text's own except block: a missing/misconfigured
+            # Tesseract binary (TesseractNotFoundError) or any other engine
+            # failure must degrade, not crash the screening request. Returning
+            # [] here is indistinguishable to the caller from "no MRZ band
+            # detected," which rules_engine.py's RULE 1 already treats as a
+            # HIGH-severity "Missing Machine Readable Zone" signal for
+            # documents expected to carry one -- routing the case to review
+            # instead of failing the request outright.
+            return []
 
         candidates = [
             re.sub(r'[^A-Z0-9<]', '', line.upper())
@@ -204,6 +215,18 @@ class TesseractOCRService(BaseOCRService):
             return None
         m = re.search(r'(\d{1,2})\D{0,2}(\d{1,2})\D{0,2}(\d{4})', value_line)
         if not m:
+            return None
+        # Reproduces a real failure: this pattern's lenient, separator-
+        # optional groups will assemble a "date" out of ANY bare 6-8 digit
+        # run, including ones that aren't a date at all (observed live: a
+        # 6-digit PIN code "560039" on an Aadhaar card parsed as day=05,
+        # month=06, year=0039). A plausible human date's year must fall in
+        # a sane range -- rejecting an implausible one here is a much
+        # narrower fix than tightening the separator tolerance itself,
+        # which was added deliberately to survive a different real OCR
+        # failure (a dropped separator character).
+        year = int(m.group(3))
+        if not (1900 <= year <= 2099):
             return None
         return f"{m.group(1).zfill(2)}/{m.group(2).zfill(2)}/{m.group(3)}"
 
@@ -318,13 +341,25 @@ class TesseractOCRService(BaseOCRService):
         # label-above-value layout -- try the label's own line first, and
         # only fall back to the line below it if that line has no date of
         # its own (a label-only line, value printed underneath).
+        #
+        # Keeps scanning past a matching label line that yields no real
+        # date rather than committing to it -- reproduces a real failure:
+        # a genuine Aadhaar card's own disclaimer text ("...not of
+        # citizenship or date of birth (DOB)...") mentions the word "DOB"
+        # well before the holder's own labeled DOB field, and the old code
+        # locked onto that first incidental mention (and its unrelated
+        # next line) instead of continuing to look for a line that
+        # actually parses as a date.
         dob_label_pattern = r'\b(DOB|DATE OF BIRTH)\b'
         dob_line = None
         for i, line in enumerate(lines):
-            if re.search(dob_label_pattern, line, re.IGNORECASE):
-                dob_line = line if self._extract_date(line) else (
-                    lines[i + 1] if i + 1 < len(lines) else None
-                )
+            if not re.search(dob_label_pattern, line, re.IGNORECASE):
+                continue
+            candidate = line if self._extract_date(line) else (
+                lines[i + 1] if i + 1 < len(lines) else None
+            )
+            if self._extract_date(candidate):
+                dob_line = candidate
                 break
         fields["date_of_birth"] = self._extract_date(dob_line)
 
@@ -338,10 +373,23 @@ class TesseractOCRService(BaseOCRService):
         # fallback, extended with Aadhaar's own institutional boilerplate so
         # header text ("Government of India", "Unique Identification
         # Authority of India") isn't mistaken for the holder's name.
-        for line in lines[:10]:
+        #
+        # Window widened from the original 10 lines, and a real name (a
+        # space-separated multi-word run) is now required: reproduces a
+        # real failure on an actual Aadhaar photo where a single OCR-
+        # garbled token from unrelated boilerplate text ("cendaiead.")
+        # fullmatched this same letters-only pattern and won purely
+        # because it appeared earlier in the scan than the real name.
+        # NOTE this does not catch every real-world case -- a multi-word
+        # garbled fragment that also dodges the boilerplate keyword
+        # exclusion below (e.g. "Unique" OCR'd as "Unaque") can still win;
+        # that residual gap needs fuzzy/approximate keyword matching or a
+        # different extraction strategy entirely, out of scope here.
+        for line in lines[:15]:
             clean_l = line.strip()
             if (
                 len(clean_l) > 4
+                and " " in clean_l
                 and re.fullmatch(r"[A-Za-z.'\- ]+", clean_l)
                 and not re.search(r'\b(DOB|DATE OF BIRTH|MALE|FEMALE|TRANSGENDER)\b', clean_l, re.IGNORECASE)
                 # Individual words, not multi-word phrases: real Tesseract
@@ -558,13 +606,29 @@ class TesseractOCRService(BaseOCRService):
 
         return fields
 
+    # Forces single-column page segmentation rather than Tesseract's default
+    # fully-automatic layout analysis (PSM 3). Reproduces a real failure
+    # found by running an actual photographed Aadhaar card (not a synthetic
+    # specimen) through this pipeline: PSM 3's automatic segmentation
+    # produced near-total garbage on that real, denser, mixed-script/
+    # QR-code layout (Tesseract's own OSD reported near-zero orientation/
+    # script confidence), while this same PSM (already used by
+    # extract_mrz_lines, for the same underlying reason) recovered the
+    # document almost completely. Confirmed byte-for-byte identical output
+    # to the old default on every synthetic specimen this project generates
+    # (passport, PAN, driving licence, voter ID) -- this is a real-document
+    # robustness fix, not a synthetic-path behavior change.
+    GENERAL_OCR_CONFIG = "--psm 4"
+
     def extract_text(self, image_path: str) -> Dict[str, Any]:
         try:
             preprocessed = self.preprocess_image(image_path)
-            
+
             # Use PyTesseract with both text and layout analysis
-            ocr_data = pytesseract.image_to_data(preprocessed, output_type=pytesseract.Output.DICT)
-            raw_text = pytesseract.image_to_string(preprocessed)
+            ocr_data = pytesseract.image_to_data(
+                preprocessed, output_type=pytesseract.Output.DICT, config=self.GENERAL_OCR_CONFIG
+            )
+            raw_text = pytesseract.image_to_string(preprocessed, config=self.GENERAL_OCR_CONFIG)
 
             # Compute average confidence over non-empty words
             confs = [float(c) for c in ocr_data.get("conf", []) if str(c).replace("-1", "").strip()]
