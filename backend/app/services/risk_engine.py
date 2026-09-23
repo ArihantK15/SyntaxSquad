@@ -191,7 +191,15 @@ class RiskEngine:
             # it) and only fires on a REAL computed gap, never on missing
             # MRZ data -- see estimate_face_age_gap's None-on-insufficient-
             # data contract.
-            age_gap = estimate_face_age_gap(mrz_data)
+            #
+            # Restricted to status == "MATCH": the aging rationale only
+            # supports softening a borderline SIMILARITY SCORE. It must
+            # never fire on REVIEW_REQUIRED/NO_FACE_DETECTED/MULTIPLE_FACES
+            # -- those are the module's own affirmative mismatch/no-face
+            # verdicts, not aging uncertainty, and discounting them would
+            # soften the exact signal that caught a genuine impersonation
+            # on an old-but-unaltered document.
+            age_gap = estimate_face_age_gap(mrz_data) if status == "MATCH" else None
             if age_gap:
                 discount, tier = face_weight_discount_for_gap(age_gap["effective_gap_years"])
                 if tier:

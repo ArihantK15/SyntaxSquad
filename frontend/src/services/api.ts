@@ -6,13 +6,16 @@ import {
   AuditLog,
   OfficerDecision,
   ChainVerificationResult,
-  PolicySettings
+  PolicySettings,
+  BlockchainAnchor
 } from '../types';
 
 const API_BASE = '/api';
 
-// Required (X-API-Key header) for the two most sensitive, irreversible
-// actions: case deletion and the biometric purge protocol -- see
+// Required (X-API-Key header) for the most sensitive, irreversible or
+// system-wide actions: case deletion, the biometric purge protocol,
+// updating the risk engine's live policy weights/thresholds, and anchoring
+// the audit chain to a public blockchain testnet -- see
 // backend/app/api/deps.py's require_officer_auth for what this does and
 // does not protect against (a minimal gate, not full per-officer auth).
 // Falls back to the backend's own default so the demo works out of the box;
@@ -142,6 +145,24 @@ export const api = {
     return res.json();
   },
 
+  async listBlockchainAnchors(): Promise<BlockchainAnchor[]> {
+    const res = await fetch(`${API_BASE}/audit/anchors`);
+    if (!res.ok) throw new Error('Failed to fetch blockchain anchor history');
+    return res.json();
+  },
+
+  async anchorAuditChain(): Promise<BlockchainAnchor> {
+    const res = await fetch(`${API_BASE}/audit/anchor`, {
+      method: 'POST',
+      headers: { 'X-API-Key': OFFICER_API_KEY }
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.detail || 'Failed to anchor audit chain to testnet');
+    }
+    return res.json();
+  },
+
   // --- Staged Screening Pipeline Steps ---
   async uploadScreeningDocument(
     file: File,
@@ -243,7 +264,7 @@ export const api = {
   async updatePolicy(policy: PolicySettings): Promise<PolicySettings> {
     const res = await fetch(`${API_BASE}/settings/policy`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-API-Key': OFFICER_API_KEY },
       body: JSON.stringify(policy)
     });
     if (!res.ok) {

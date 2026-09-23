@@ -3,8 +3,10 @@ import cv2
 import numpy as np
 import torch
 from abc import ABC, abstractmethod
+from datetime import datetime
 from typing import Dict, Any, List, Optional
 from pathlib import Path
+from PIL import Image
 
 from app.core.config import settings
 from app.ml.tamper_model import LightweightForensicCNN, TamperForensics
@@ -19,6 +21,24 @@ WEIGHTS_PATH = Path(__file__).resolve().parent.parent / "ml" / "weights" / "tamp
 
 
 class TamperDetectionService(BaseTamperService):
+    # Camera/scanner capture pipelines never write one of these as their own
+    # EXIF Software tag -- each name here belongs exclusively to a
+    # post-capture image editor, so a match has no legitimate documentary-
+    # capture explanation (unlike bare EXIF absence, which innocent
+    # pipelines produce too -- see analyze_exif_metadata).
+    EXIF_EDITOR_SOFTWARE_MARKERS = (
+        "PHOTOSHOP", "GIMP", "PAINT.NET", "AFFINITY PHOTO", "LIGHTROOM",
+        "SNAPSEED", "PIXLR", "CANVA", "PICSART"
+    )
+
+    # A genuine single capture-to-storage write leaves DateTime (last save)
+    # and DateTimeOriginal (capture) identical or, at most, a few
+    # seconds/minutes apart from encoder latency. Set well above that so
+    # ordinary clock-skew/timezone quirks between the two tags don't fire
+    # this on an unedited capture -- only a re-save meaningfully later than
+    # capture should.
+    EXIF_DATE_GAP_SUSPICIOUS_HOURS = 24.0
+
     def __init__(self):
         self.device = torch.device("cpu")
         self.model = LightweightForensicCNN().to(self.device)
@@ -142,6 +162,102 @@ class TamperDetectionService(BaseTamperService):
             "signals": signals
         }
 
+    @staticmethod
+    def _evaluate_exif_signals(exif: Dict[int, Any], exif_ifd: Dict[int, Any]) -> List[Dict[str, Any]]:
+        """
+        Pure decision logic for Signal E (EXIF metadata), factored out from
+        the file I/O in analyze_exif_metadata so each rule can be pinned
+        down against plain tag dicts -- the same way _aggregate_tamper_score
+        above is tested against plain numbers rather than real files.
+
+        `exif` is the top-level IFD0 tag dict (Software=305, DateTime=306,
+        etc.); `exif_ifd` is the nested Exif sub-IFD (DateTimeOriginal=36867,
+        DateTimeDigitized=36868) -- see PIL's Image.Exif.get_ifd(0x8769).
+        """
+        if not exif:
+            # Bare absence is real but weak: innocent pipelines (WhatsApp/
+            # Telegram recompression, a screenshot of an already-issued
+            # digital ID) strip EXIF just as thoroughly as tampering does,
+            # so this can't be allowed to dominate the aggregate score --
+            # confidence stays well below the other signals here.
+            return [{
+                "type": "exif_metadata_missing",
+                "confidence": 0.35,
+                "region": [],
+                "explanation": (
+                    "No EXIF metadata present. A genuine phone or scanner "
+                    "capture typically embeds some capture metadata, but "
+                    "its complete absence is also common for innocent "
+                    "reasons (messaging-app recompression, a screenshot of "
+                    "an already-issued digital document) -- treated as a "
+                    "weak signal on its own."
+                )
+            }]
+
+        signals: List[Dict[str, Any]] = []
+
+        software = exif.get(305)  # Software (IFD0)
+        if software and any(marker in str(software).upper() for marker in TamperDetectionService.EXIF_EDITOR_SOFTWARE_MARKERS):
+            signals.append({
+                "type": "exif_editing_software",
+                "confidence": 0.85,
+                "region": [],
+                "explanation": (
+                    f"EXIF Software tag identifies image-editing software "
+                    f"('{software}'), not a camera or scanner capture "
+                    f"pipeline -- inconsistent with a direct, unedited "
+                    f"document photo."
+                )
+            })
+
+        date_original = exif_ifd.get(36867) or exif_ifd.get(36868)  # DateTimeOriginal, else DateTimeDigitized
+        date_modified = exif.get(306)  # DateTime -- IFD0's "file change" tag
+        if date_original and date_modified:
+            try:
+                fmt = "%Y:%m:%d %H:%M:%S"
+                dt_original = datetime.strptime(str(date_original), fmt)
+                dt_modified = datetime.strptime(str(date_modified), fmt)
+                gap_hours = (dt_modified - dt_original).total_seconds() / 3600.0
+            except (ValueError, TypeError):
+                gap_hours = 0.0
+
+            if gap_hours > TamperDetectionService.EXIF_DATE_GAP_SUSPICIOUS_HOURS:
+                signals.append({
+                    "type": "exif_date_inconsistency",
+                    "confidence": min(0.9, round(0.6 + gap_hours / 500.0, 2)),
+                    "region": [],
+                    "explanation": (
+                        f"EXIF modification timestamp is {gap_hours:.1f} "
+                        f"hours after the original capture timestamp -- "
+                        f"consistent with the file being re-saved well "
+                        f"after capture, rather than a single direct "
+                        f"capture-to-storage write."
+                    )
+                })
+
+        return signals
+
+    def analyze_exif_metadata(self, image_path: str) -> Dict[str, Any]:
+        """
+        Signal E: inspects the file's own embedded EXIF metadata for
+        evidence of post-capture editing -- distinct from every signal
+        above, which all analyze pixel CONTENT. This one survives an edit
+        that leaves no visible pixel trace at all (e.g. a metadata-only
+        tool, or a re-save that happens not to disturb ELA/edge/CNN
+        detectability).
+        """
+        try:
+            with Image.open(image_path) as pil_img:
+                exif = pil_img.getexif()
+                exif_ifd = exif.get_ifd(0x8769) if exif else {}
+        except Exception:
+            # An unreadable/corrupt EXIF block is itself consistent with a
+            # re-saved or edited file, but too ambiguous on its own (could
+            # just as easily be a harmless encoder quirk) to score here.
+            return {"signals": []}
+
+        return {"signals": self._evaluate_exif_signals(exif, exif_ifd)}
+
     def analyze(self, image_path: str, case_id: str) -> Dict[str, Any]:
         if not os.path.exists(image_path):
             raise FileNotFoundError(f"Document image not found: {image_path}")
@@ -224,6 +340,12 @@ class TamperDetectionService(BaseTamperService):
                     region_probs.append(float(probs[1]))
             if region_probs:
                 cnn_tamper_prob = max(region_probs)
+
+        # 6. EXIF metadata analysis (Signal E) -- the one signal here that
+        # inspects the file's own embedded metadata rather than pixel
+        # content, so it survives edits that leave no visible pixel trace.
+        exif_res = self.analyze_exif_metadata(image_path)
+        signals.extend(exif_res["signals"])
 
         tamper_risk = self._aggregate_tamper_score(mean_ela, cnn_tamper_prob, signals)
 

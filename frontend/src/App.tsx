@@ -31,7 +31,7 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className="flex h-screen bg-[#070a12] text-slate-100 overflow-hidden font-sans">
+    <div className="flex h-screen bg-[#070a12] text-graphite-100 overflow-hidden font-sans">
       {/* Sidebar */}
       <Sidebar
         currentTab={currentTab}

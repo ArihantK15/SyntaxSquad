@@ -65,8 +65,8 @@ export const CaseDetailPage: React.FC<CaseDetailPageProps> = ({ caseId, onBack }
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
         <div className="flex flex-col items-center gap-3">
-          <Loader2 className="w-8 h-8 text-cyan-400 animate-spin" />
-          <span className="text-xs font-mono text-slate-400">Loading case file {caseId}...</span>
+          <Loader2 className="w-8 h-8 text-brass-400 animate-spin" />
+          <span className="text-xs text-graphite-400">Loading case file {caseId}...</span>
         </div>
       </div>
     );
@@ -140,7 +140,7 @@ export const CaseDetailPage: React.FC<CaseDetailPageProps> = ({ caseId, onBack }
       <div className="flex items-center justify-between">
         <button
           onClick={onBack}
-          className="flex items-center gap-2 text-xs font-mono text-slate-400 hover:text-cyan-400 transition-colors cursor-pointer"
+          className="flex items-center gap-2 text-xs text-graphite-400 hover:text-brass-400 transition-colors cursor-pointer"
         >
           <ArrowLeft className="w-4 h-4" />
           <span>Back to Screening Operations</span>
@@ -150,7 +150,7 @@ export const CaseDetailPage: React.FC<CaseDetailPageProps> = ({ caseId, onBack }
           <button
             onClick={handleDownloadPdf}
             disabled={exportingPdf}
-            className="p-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200 transition-colors text-xs flex items-center gap-1.5 font-mono cursor-pointer disabled:opacity-50"
+            className="p-1.5 rounded-lg bg-graphite-900 border border-graphite-800 text-graphite-400 hover:text-graphite-200 transition-colors text-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
             title="Download a PDF summary of this case"
           >
             {exportingPdf ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
@@ -159,7 +159,7 @@ export const CaseDetailPage: React.FC<CaseDetailPageProps> = ({ caseId, onBack }
 
           <button
             onClick={fetchCase}
-            className="p-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200 transition-colors text-xs flex items-center gap-1.5 font-mono cursor-pointer"
+            className="p-1.5 rounded-lg bg-graphite-900 border border-graphite-800 text-graphite-400 hover:text-graphite-200 transition-colors text-xs flex items-center gap-1.5 cursor-pointer"
             title="Refresh case data"
           >
             <RefreshCw className="w-3.5 h-3.5" />

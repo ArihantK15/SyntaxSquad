@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import desc, asc
 from typing import Optional, Dict, Any, List
 
-from app.models import AuditLog
+from app.models import AuditLog, Case, BlockchainAnchor
 
 GENESIS_HASH = "0" * 64
 
@@ -161,4 +161,88 @@ class AuditService:
             "verified_at": datetime.utcnow(),
             "compromised_id": None,
             "reason": f"All {len(all_logs)} blocks cryptographically verified intact via SHA-256 chaining."
+        }
+
+    @classmethod
+    def get_case_anchor_proof(cls, db: Session, case_number: str) -> Dict[str, Any]:
+        """
+        Determines whether a case's audit trail is covered by a public
+        blockchain anchor -- keyed by the case's human-facing case_number
+        (e.g. "BM-2026-A1B2C"), not the internal UUID, since that's what
+        would actually be handed to someone to verify independently.
+
+        A BlockchainAnchor's total_records_at_anchor is the GLOBAL audit
+        ledger's entry count at anchor time (see api/routes/audit.py's
+        anchor_audit_chain). Since the ledger is one single hash chain
+        across every case (see verify_chain's docstring), a case's audit
+        trail is cryptographically committed to by any anchor whose
+        total_records_at_anchor is at or after that case's own last
+        entry's position in the GLOBAL ordered ledger -- the chaining
+        property means the anchor's on-chain hash recursively embeds every
+        earlier entry's hash, this case's included.
+
+        Deliberately returns nothing beyond proof-of-anchoring: this backs
+        a public, unauthenticated endpoint, and must never leak the case's
+        risk score, name, document number, or any other case field.
+        """
+        case = db.query(Case).filter(Case.case_number == case_number).first()
+        if not case:
+            return {
+                "case_number": case_number,
+                "case_found": False,
+                "chain_valid": False,
+                "anchored": False,
+                "anchor": None,
+                "message": f"No case found with number '{case_number}'."
+            }
+
+        verification = cls.verify_chain(db, case_id=case.id)
+        if verification["total_records"] == 0:
+            return {
+                "case_number": case_number,
+                "case_found": True,
+                "chain_valid": verification["valid"],
+                "anchored": False,
+                "anchor": None,
+                "message": "This case has no audit trail yet."
+            }
+
+        if not verification["valid"]:
+            return {
+                "case_number": case_number,
+                "case_found": True,
+                "chain_valid": False,
+                "anchored": False,
+                "anchor": None,
+                "message": "This case's audit chain failed cryptographic verification. Do not trust any prior anchor for this case."
+            }
+
+        all_logs = db.query(AuditLog).order_by(asc(AuditLog.timestamp), asc(AuditLog.id)).all()
+        case_positions = [i for i, log in enumerate(all_logs, start=1) if log.case_id == case.id]
+        last_position = case_positions[-1]
+
+        covering_anchor = (
+            db.query(BlockchainAnchor)
+            .filter(BlockchainAnchor.total_records_at_anchor >= last_position)
+            .order_by(asc(BlockchainAnchor.created_at))
+            .first()
+        )
+
+        if covering_anchor:
+            return {
+                "case_number": case_number,
+                "case_found": True,
+                "chain_valid": True,
+                "anchored": True,
+                "anchor": covering_anchor,
+                "message": f"This case's audit trail is anchored on {covering_anchor.network}. Verify independently at the link below."
+            }
+
+        return {
+            "case_number": case_number,
+            "case_found": True,
+            "chain_valid": True,
+            "anchored": False,
+            "anchor": None,
+            "message": "This case's audit trail exists and is cryptographically valid, but has not yet been anchored to a public blockchain."
         }

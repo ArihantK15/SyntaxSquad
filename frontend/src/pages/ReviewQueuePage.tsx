@@ -55,24 +55,24 @@ export const ReviewQueuePage: React.FC<ReviewQueuePageProps> = ({ onSelectCase }
         <SectionHeading
           title="Officer review queue"
           description="Cases flagged by the AI risk engine requiring human review and disposition."
-          icon={<Inbox className="w-5 h-5 text-cyan-400" />}
+          icon={<Inbox className="w-5 h-5 text-brass-400" />}
         />
 
         {/* Search Bar */}
         <div className="relative w-full sm:w-72">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+          <Search className="w-4 h-4 text-graphite-400 absolute left-3 top-2.5" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search Case ID or Country..."
-            className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-3 py-2 text-xs font-mono text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+            className="w-full bg-graphite-950 border border-graphite-800 rounded-lg pl-9 pr-3 py-2 text-xs text-graphite-200 placeholder-graphite-500 focus:outline-none focus:border-brass-500"
           />
         </div>
       </div>
 
       {/* Filter Tabs */}
-      <div className="flex items-center gap-2 border-b border-slate-800 pb-3 flex-wrap">
+      <div className="flex items-center gap-2 border-b border-graphite-800 pb-3 flex-wrap">
         {[
           { id: 'ALL', label: 'All Pending Review' },
           { id: 'CRITICAL', label: 'Critical Risk' },
@@ -83,10 +83,10 @@ export const ReviewQueuePage: React.FC<ReviewQueuePageProps> = ({ onSelectCase }
           <button
             key={tab.id}
             onClick={() => setFilterLevel(tab.id)}
-            className={`px-3 py-1.5 rounded-lg text-xs font-mono transition-all cursor-pointer ${
+            className={`px-3 py-1.5 rounded-lg text-xs transition-all cursor-pointer ${
               filterLevel === tab.id
-                ? 'bg-cyan-950 text-cyan-300 font-bold border border-cyan-500/40 shadow-inner'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+                ? 'bg-brass-950 text-brass-300 font-bold border border-brass-500/40 shadow-inner'
+                : 'text-graphite-400 hover:text-graphite-200 hover:bg-graphite-900'
             }`}
           >
             {tab.label}
@@ -95,19 +95,19 @@ export const ReviewQueuePage: React.FC<ReviewQueuePageProps> = ({ onSelectCase }
       </div>
 
       {/* Queue Table */}
-      <div className="bg-slate-900/80 border border-slate-800 rounded-xl overflow-hidden backdrop-blur">
+      <div className="bg-graphite-900/80 border border-graphite-800 rounded-xl overflow-hidden backdrop-blur">
         {loading ? (
-          <div className="p-12 text-center text-xs font-mono text-slate-400">
+          <div className="p-12 text-center text-xs text-graphite-400">
             Loading queue cases...
           </div>
         ) : filtered.length === 0 ? (
-          <div className="p-12 text-center text-xs font-mono text-slate-400">
+          <div className="p-12 text-center text-xs text-graphite-400">
             No screening cases in this queue view.
           </div>
         ) : (
           <ScrollShadowX>
-            <table className="w-full text-left text-xs font-mono">
-              <thead className="bg-slate-950/80 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-800">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-graphite-950/80 text-graphite-400 uppercase text-[10px] tracking-wider border-b border-graphite-800">
                 <tr>
                   <th className="px-4 py-3">Case ID</th>
                   <th className="px-4 py-3">Jurisdiction</th>
@@ -118,38 +118,38 @@ export const ReviewQueuePage: React.FC<ReviewQueuePageProps> = ({ onSelectCase }
                   <th className="px-4 py-3 text-right">Action</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-800/60">
+              <tbody className="divide-y divide-graphite-800/60">
                 {filtered.map((c) => (
                   <tr
                     key={c.id}
                     onClick={() => onSelectCase(c.id)}
-                    className="hover:bg-slate-800/40 cursor-pointer transition-colors"
+                    className="hover:bg-graphite-800/40 cursor-pointer transition-colors"
                   >
-                    <td className="px-4 py-3 font-bold text-cyan-300">
+                    <td className="px-4 py-3 font-mono font-bold text-brass-300">
                       {c.case_number}
                     </td>
-                    <td className="px-4 py-3 text-slate-300">
+                    <td className="px-4 py-3 text-graphite-300">
                       {c.country}
                     </td>
-                    <td className="px-4 py-3 text-slate-400">
+                    <td className="px-4 py-3 text-graphite-400">
                       {c.document_type}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
-                        <span className="font-bold text-slate-200">
+                        <span className="font-bold text-graphite-200">
                           {Math.round(c.risk_score)}
                         </span>
                         <RiskBadge level={c.risk_level} size="sm" />
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-slate-400 truncate max-w-xs">
+                    <td className="px-4 py-3 text-graphite-400 truncate max-w-xs">
                       {c.recommendation}
                     </td>
                     <td className="px-4 py-3">
                       <RiskBadge status={c.officer_decision} size="sm" />
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <button className="text-cyan-400 hover:text-cyan-200 font-bold flex items-center gap-1 ml-auto">
+                      <button className="text-brass-400 hover:text-brass-200 font-bold flex items-center gap-1 ml-auto">
                         <span>Inspect</span>
                         <ChevronRight className="w-3.5 h-3.5" />
                       </button>

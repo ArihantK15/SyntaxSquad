@@ -238,8 +238,8 @@ export const ScreeningPage: React.FC<ScreeningPageProps> = ({ onScreeningComplet
 
       {/* Specimen Generator -- a test/judging shortcut, not the primary task,
           so it's a plain utility row rather than another bordered card. */}
-      <div className="flex flex-col sm:flex-row sm:items-center gap-3 pb-5 border-b border-slate-800/60">
-        <span className="flex items-center gap-1.5 text-xs text-slate-500 shrink-0">
+      <div className="flex flex-col sm:flex-row sm:items-center gap-3 pb-5 border-b border-graphite-800/60">
+        <span className="flex items-center gap-1.5 text-xs text-graphite-500 shrink-0">
           <Sparkles className="w-3.5 h-3.5" />
           Specimen generator
         </span>
@@ -249,33 +249,33 @@ export const ScreeningPage: React.FC<ScreeningPageProps> = ({ onScreeningComplet
             type="button"
             onClick={() => handleGenerateSpecimen('genuine')}
             disabled={generatingSpecimen || isProcessing}
-            className="px-3 py-1.5 rounded-lg border border-slate-800 hover:border-emerald-500/50 hover:text-emerald-300 text-xs text-slate-300 transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+            className="px-3 py-1.5 rounded-lg border border-graphite-800 hover:border-emerald-500/50 hover:text-emerald-300 text-xs text-graphite-300 transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
           >
             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
             Generate genuine demo
           </button>
 
-          <div className="flex rounded-lg overflow-hidden border border-slate-800">
+          <div className="flex rounded-lg overflow-hidden border border-graphite-800">
             <select
               value={tamperOption}
               onChange={(e) => setTamperOption(e.target.value)}
               disabled={generatingSpecimen || isProcessing}
-              className="bg-transparent text-slate-300 px-2 py-1.5 text-xs focus:outline-none min-w-0 border-r border-slate-800 cursor-pointer"
+              className="bg-transparent text-graphite-300 px-2 py-1.5 text-xs focus:outline-none min-w-0 border-r border-graphite-800 cursor-pointer"
             >
-              <option value="photo_replaced" className="bg-slate-900">Photo replacement</option>
-              <option value="mrz_tampered" className="bg-slate-900">MRZ checksum corruption</option>
-              <option value="altered_text" className="bg-slate-900">Altered date/text</option>
-              <option value="expired" className="bg-slate-900">Expired document</option>
-              <option value="stamp_manipulated" className="bg-slate-900">Pasted stamp patch</option>
-              <option value="brightness_manipulated" className="bg-slate-900">Brightness hotspot</option>
-              <option value="multiple_anomalies" className="bg-slate-900">Multiple anomalies</option>
+              <option value="photo_replaced" className="bg-graphite-900">Photo replacement</option>
+              <option value="mrz_tampered" className="bg-graphite-900">MRZ checksum corruption</option>
+              <option value="altered_text" className="bg-graphite-900">Altered date/text</option>
+              <option value="expired" className="bg-graphite-900">Expired document</option>
+              <option value="stamp_manipulated" className="bg-graphite-900">Pasted stamp patch</option>
+              <option value="brightness_manipulated" className="bg-graphite-900">Brightness hotspot</option>
+              <option value="multiple_anomalies" className="bg-graphite-900">Multiple anomalies</option>
             </select>
 
             <button
               type="button"
               onClick={() => handleGenerateSpecimen(tamperOption)}
               disabled={generatingSpecimen || isProcessing}
-              className="px-3 py-1.5 text-slate-300 hover:text-rose-300 text-xs transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shrink-0 whitespace-nowrap"
+              className="px-3 py-1.5 text-graphite-300 hover:text-rose-300 text-xs transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shrink-0 whitespace-nowrap"
               title="Generate tampered demo"
             >
               <Flame className="w-3.5 h-3.5 text-rose-400" />
@@ -288,8 +288,8 @@ export const ScreeningPage: React.FC<ScreeningPageProps> = ({ onScreeningComplet
       {/* Two primary inputs, side by side */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {/* Document Upload Area */}
-        <div className="p-5 rounded-xl bg-slate-900/90 border border-slate-800 space-y-4">
-          <SectionHeading level="h3" title="Document specimen" icon={<FileText className="w-4 h-4 text-cyan-400" />} />
+        <div className="p-5 rounded-xl bg-graphite-900/90 border border-graphite-800 space-y-4">
+          <SectionHeading level="h3" title="Document specimen" icon={<FileText className="w-4 h-4 text-brass-400" />} />
 
           <input
             type="file"
@@ -307,10 +307,10 @@ export const ScreeningPage: React.FC<ScreeningPageProps> = ({ onScreeningComplet
             onDrop={handleDocDrop}
             className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-all ${
               isDraggingDoc
-                ? 'border-cyan-400 bg-cyan-950/30'
+                ? 'border-brass-400 bg-brass-950/30'
                 : docPreview
-                ? 'border-cyan-500/50 bg-slate-950/80'
-                : 'border-slate-700 hover:border-cyan-400/50 bg-slate-950/40 hover:bg-slate-950/60'
+                ? 'border-brass-500/50 bg-graphite-950/80'
+                : 'border-graphite-700 hover:border-brass-400/50 bg-graphite-950/40 hover:bg-graphite-950/60'
             }`}
           >
             {docPreview ? (
@@ -318,19 +318,19 @@ export const ScreeningPage: React.FC<ScreeningPageProps> = ({ onScreeningComplet
                 <img
                   src={docPreview}
                   alt="Document Preview"
-                  className="max-h-52 mx-auto rounded-lg border border-slate-800 object-contain shadow-md"
+                  className="max-h-52 mx-auto rounded-lg border border-graphite-800 object-contain shadow-md"
                 />
-                <span className="text-xs text-cyan-300 block">
+                <span className="text-xs text-brass-300 block">
                   Click to replace document image
                 </span>
               </div>
             ) : (
               <div className="space-y-2 py-4">
-                <UploadCloud className="w-8 h-8 text-slate-500 mx-auto" />
-                <p className="text-sm text-slate-300 font-medium">
+                <UploadCloud className="w-8 h-8 text-graphite-500 mx-auto" />
+                <p className="text-sm text-graphite-300 font-medium">
                   Drop travel document here or click to browse
                 </p>
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-graphite-500">
                   JPG, JPEG, PNG — normalized up to 1600px
                 </p>
               </div>
@@ -340,13 +340,13 @@ export const ScreeningPage: React.FC<ScreeningPageProps> = ({ onScreeningComplet
           {/* Document Metadata Form */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs text-slate-500 block mb-1">
+              <label className="text-xs text-graphite-500 block mb-1">
                 Document type
               </label>
               <select
                 value={documentType}
                 onChange={(e) => setDocumentType(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-cyan-500"
+                className="w-full bg-graphite-950 border border-graphite-800 rounded-lg px-3 py-2 text-xs text-graphite-200 focus:outline-none focus:border-brass-500"
               >
                 <option value="Passport">Passport (TD3)</option>
                 <option value="National ID">National ID (TD1)</option>
@@ -355,13 +355,13 @@ export const ScreeningPage: React.FC<ScreeningPageProps> = ({ onScreeningComplet
             </div>
 
             <div>
-              <label className="text-xs text-slate-500 block mb-1">
+              <label className="text-xs text-graphite-500 block mb-1">
                 Issuing jurisdiction
               </label>
               <select
                 value={country}
                 onChange={(e) => setCountry(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-cyan-500"
+                className="w-full bg-graphite-950 border border-graphite-800 rounded-lg px-3 py-2 text-xs text-graphite-200 focus:outline-none focus:border-brass-500"
               >
                 <option value="REPUBLIC OF UTOPIA">Republic of Utopia (UTO)</option>
                 <option value="DEMO STATE">Demo State (DEM)</option>
@@ -374,13 +374,13 @@ export const ScreeningPage: React.FC<ScreeningPageProps> = ({ onScreeningComplet
         </div>
 
         {/* Live Face Capture: Webcam in browser or File upload */}
-        <div className="p-5 rounded-xl bg-slate-900/90 border border-slate-800 space-y-4">
+        <div className="p-5 rounded-xl bg-graphite-900/90 border border-graphite-800 space-y-4">
           <SectionHeading
             level="h3"
             title="Live traveler face capture"
-            icon={<Camera className="w-4 h-4 text-cyan-400" />}
+            icon={<Camera className="w-4 h-4 text-brass-400" />}
             action={
-              <span className="text-xs text-slate-500">
+              <span className="text-xs text-graphite-500">
                 {liveFacePreview ? 'Loaded' : 'Auto-simulated if empty'}
               </span>
             }
@@ -396,7 +396,7 @@ export const ScreeningPage: React.FC<ScreeningPageProps> = ({ onScreeningComplet
 
           {/* In-Browser Webcam Viewport if active */}
           {showWebcam ? (
-            <div className="p-3 rounded-xl bg-slate-950 border border-cyan-500/50 space-y-3">
+            <div className="p-3 rounded-xl bg-graphite-950 border border-brass-500/50 space-y-3">
               <div className="relative rounded-lg overflow-hidden bg-black aspect-[4/3] max-h-64 mx-auto flex items-center justify-center">
                 <video
                   ref={videoRef}
@@ -406,8 +406,8 @@ export const ScreeningPage: React.FC<ScreeningPageProps> = ({ onScreeningComplet
                   className="w-full h-full object-cover mirror"
                 />
                 {/* Facial positioning reticle */}
-                <div className="absolute inset-0 border-2 border-cyan-400/40 rounded-full m-8 pointer-events-none flex items-center justify-center">
-                  <span className="text-[10px] text-cyan-300 bg-black/60 px-2 py-0.5 rounded">
+                <div className="absolute inset-0 border-2 border-brass-400/40 rounded-full m-8 pointer-events-none flex items-center justify-center">
+                  <span className="text-[10px] text-brass-300 bg-black/60 px-2 py-0.5 rounded">
                     Align face in frame
                   </span>
                 </div>
@@ -417,7 +417,7 @@ export const ScreeningPage: React.FC<ScreeningPageProps> = ({ onScreeningComplet
                 <button
                   type="button"
                   onClick={captureWebcamSnapshot}
-                  className="px-4 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-md"
+                  className="px-4 py-1.5 rounded-lg bg-brass-600 hover:bg-brass-500 text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-md"
                 >
                   <Camera className="w-3.5 h-3.5" />
                   <span>Snap photo</span>
@@ -426,7 +426,7 @@ export const ScreeningPage: React.FC<ScreeningPageProps> = ({ onScreeningComplet
                 <button
                   type="button"
                   onClick={stopWebcam}
-                  className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs cursor-pointer"
+                  className="px-3 py-1.5 rounded-lg bg-graphite-800 hover:bg-graphite-700 text-graphite-300 text-xs cursor-pointer"
                 >
                   Cancel
                 </button>
@@ -435,12 +435,12 @@ export const ScreeningPage: React.FC<ScreeningPageProps> = ({ onScreeningComplet
           ) : (
             <div className="flex items-center gap-4">
               {liveFacePreview ? (
-                <div className="w-20 h-20 rounded-lg overflow-hidden bg-slate-950 border border-slate-700 shrink-0">
+                <div className="w-20 h-20 rounded-lg overflow-hidden bg-graphite-950 border border-graphite-700 shrink-0">
                   <img src={liveFacePreview} alt="Live face" className="w-full h-full object-cover" />
                 </div>
               ) : (
-                <div className="w-20 h-20 rounded-lg bg-slate-950 border border-dashed border-slate-800 flex items-center justify-center shrink-0">
-                  <Camera className="w-6 h-6 text-slate-500" />
+                <div className="w-20 h-20 rounded-lg bg-graphite-950 border border-dashed border-graphite-800 flex items-center justify-center shrink-0">
+                  <Camera className="w-6 h-6 text-graphite-500" />
                 </div>
               )}
 
@@ -449,7 +449,7 @@ export const ScreeningPage: React.FC<ScreeningPageProps> = ({ onScreeningComplet
                   <button
                     type="button"
                     onClick={startWebcam}
-                    className="px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-700 hover:border-cyan-500/50 hover:text-cyan-300 text-xs text-slate-300 font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
+                    className="px-3 py-1.5 rounded-lg bg-graphite-950 border border-graphite-700 hover:border-brass-500/50 hover:text-brass-300 text-xs text-graphite-300 font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
                   >
                     <Video className="w-3.5 h-3.5" />
                     <span>Capture from webcam</span>
@@ -458,12 +458,12 @@ export const ScreeningPage: React.FC<ScreeningPageProps> = ({ onScreeningComplet
                   <button
                     type="button"
                     onClick={() => faceInputRef.current?.click()}
-                    className="px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-700 hover:border-slate-500 text-xs text-slate-300 transition-colors cursor-pointer"
+                    className="px-3 py-1.5 rounded-lg bg-graphite-950 border border-graphite-700 hover:border-graphite-500 text-xs text-graphite-300 transition-colors cursor-pointer"
                   >
                     {liveFacePreview ? 'Replace photo' : 'Upload file'}
                   </button>
                 </div>
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-graphite-500">
                   Take a live camera picture or upload an image to test document portrait comparison.
                 </p>
               </div>
@@ -476,14 +476,14 @@ export const ScreeningPage: React.FC<ScreeningPageProps> = ({ onScreeningComplet
       <button
         onClick={handleStartScreening}
         disabled={!docFile || isProcessing}
-        className="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-semibold text-sm py-3.5 rounded-xl shadow-lg shadow-cyan-950/40 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+        className="w-full bg-brass-600 hover:bg-brass-500 text-white font-semibold text-sm py-3.5 rounded-xl shadow-lg shadow-brass-950/40 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
       >
         <Play className="w-4 h-4 fill-current" />
         <span>Run full AI screening pipeline</span>
       </button>
 
       {/* Pipeline progress -- full width so the left-to-right flow has room */}
-      <div className="p-5 rounded-xl bg-slate-900/90 border border-slate-800">
+      <div className="p-5 rounded-xl bg-graphite-900/90 border border-graphite-800">
         <ProcessingPipeline
           stages={stages}
           title={isProcessing ? 'Active screening in-flight' : 'Screening pipeline'}

@@ -158,6 +158,22 @@ class TamperForensics:
             if 1500 < area < 70000 and cw > 35 and ch > 18:
                 if TamperForensics._overlaps_a_qr_box(x, y, cw, ch, qr_boxes):
                     continue
+                # A real pasted/spliced patch (a replaced photo, a pasted
+                # stamp, an altered text block) is essentially never this
+                # elongated -- this project's own synthetic patches are
+                # ~3:1 (stamp) and ~1.3:1 (photo replacement) at their most
+                # extreme. An extreme width:height ratio here is instead
+                # the geometric signature of a genuine printed design
+                # element -- confirmed against a real, unaltered Aadhaar
+                # card, where a wide, thin header banner (government
+                # emblem + wordmark row, 361x19px, ~19:1) was flagged as a
+                # "High-frequency boundary discontinuity" at 95% confidence
+                # (case BM-2026-41713). The pre-existing QR-code exclusion
+                # above only scopes out QR-shaped (near-square) regions and
+                # doesn't cover this different shape class.
+                MAX_ASPECT_RATIO = 8.0
+                if max(cw, ch) / min(cw, ch) > MAX_ASPECT_RATIO:
+                    continue
                 roi = gray[y:y+ch, x:x+cw]
                 roi_var = float(np.var(roi))
 

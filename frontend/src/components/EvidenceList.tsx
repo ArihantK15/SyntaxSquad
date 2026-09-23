@@ -17,24 +17,24 @@ export const EvidenceList: React.FC<EvidenceListProps> = ({ signals }) => {
   });
 
   return (
-    <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 backdrop-blur space-y-4">
+    <div className="bg-graphite-900/80 border border-graphite-800 rounded-xl p-5 backdrop-blur space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <SectionHeading
           level="h3"
           title={`Forensic evidence & signals (${signals.length})`}
-          icon={<ShieldAlert className="w-4 h-4 text-slate-500" />}
+          icon={<ShieldAlert className="w-4 h-4 text-graphite-500" />}
         />
 
         {/* Severity Filter Chips */}
-        <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800 text-[11px] font-mono">
+        <div className="flex items-center gap-1 bg-graphite-950 p-1 rounded-lg border border-graphite-800 text-[11px]">
           {['ALL', 'CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].map((lvl) => (
             <button
               key={lvl}
               onClick={() => setFilter(lvl)}
               className={`px-2 py-0.5 rounded transition-colors cursor-pointer ${
                 filter === lvl
-                  ? 'bg-slate-800 text-slate-200 font-bold border border-slate-700'
-                  : 'text-slate-400 hover:text-slate-200'
+                  ? 'bg-graphite-800 text-graphite-200 font-bold border border-graphite-700'
+                  : 'text-graphite-400 hover:text-graphite-200'
               }`}
             >
               {lvl}
@@ -44,7 +44,7 @@ export const EvidenceList: React.FC<EvidenceListProps> = ({ signals }) => {
       </div>
 
       {filtered.length === 0 ? (
-        <div className="p-4 rounded-lg bg-slate-950/60 border border-slate-800 text-center text-xs text-slate-400 font-mono">
+        <div className="p-4 rounded-lg bg-graphite-950/60 border border-graphite-800 text-center text-xs text-graphite-400">
           No signals matching the selected criteria.
         </div>
       ) : (
@@ -52,26 +52,26 @@ export const EvidenceList: React.FC<EvidenceListProps> = ({ signals }) => {
           {filtered.map((sig, idx) => (
             <div
               key={idx}
-              className="p-3 rounded-lg bg-slate-950/70 border border-slate-800/80 hover:border-slate-700 transition-all flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs font-mono"
+              className="p-3 rounded-lg bg-graphite-950/70 border border-graphite-800/80 hover:border-graphite-700 transition-all flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs"
             >
               <div className="space-y-1 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-bold text-[10px]">
+                  <span className="px-2 py-0.5 rounded bg-graphite-800 text-graphite-300 font-bold text-[10px]">
                     {sig.module}
                   </span>
                   <RiskBadge level={sig.severity} size="sm" />
-                  <span className="font-semibold text-slate-200">{sig.signal}</span>
+                  <span className="font-semibold text-graphite-200">{sig.signal}</span>
                 </div>
-                <p className="text-slate-400 text-[11px] leading-relaxed">
+                <p className="text-graphite-400 text-[11px] leading-relaxed">
                   {sig.explanation}
                 </p>
               </div>
 
-              <div className="flex sm:flex-col items-end justify-between sm:justify-center shrink-0 w-full sm:w-auto pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-800 text-right">
-                <span className="text-rose-400 font-bold font-mono">
+              <div className="flex sm:flex-col items-end justify-between sm:justify-center shrink-0 w-full sm:w-auto pt-2 sm:pt-0 border-t sm:border-t-0 border-graphite-800 text-right">
+                <span className="text-rose-400 font-bold">
                   +{sig.score_impact > 0 ? sig.score_impact.toFixed(1) : '0'} pts
                 </span>
-                <span className="text-[10px] text-slate-400">
+                <span className="text-[10px] text-graphite-400">
                   Conf: {Math.round((sig.confidence || 0.9) * 100)}%
                 </span>
               </div>

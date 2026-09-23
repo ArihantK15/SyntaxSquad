@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BorderMesh — Case Verification</title>
+<style>
+  :root {
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: #070a12;
+    color: #e5e9f0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    display: flex;
+    justify-content: center;
+    padding: 48px 16px;
+  }
+  main {
+    width: 100%;
+    max-width: 560px;
+  }
+  h1 {
+    font-size: 1.4rem;
+    font-weight: 600;
+    margin: 0 0 6px;
+  }
+  .subtitle {
+    color: #94a3b8;
+    font-size: 0.95rem;
+    margin: 0 0 32px;
+  }
+  form {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 24px;
+  }
+  input[type="text"] {
+    flex: 1;
+    background: #0f1420;
+    border: 1px solid #1f2937;
+    border-radius: 8px;
+    color: #e5e9f0;
+    padding: 12px 14px;
+    font-size: 1rem;
+    outline: none;
+  }
+  input[type="text"]:focus {
+    border-color: #22d3ee;
+  }
+  button {
+    background: #22d3ee;
+    color: #06131a;
+    border: none;
+    border-radius: 8px;
+    padding: 12px 20px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+  .card {
+    border-radius: 12px;
+    padding: 24px;
+    border: 1px solid #1f2937;
+    background: #0f1420;
+  }
+  .card.ok { border-color: #14532d; background: #0c1a12; }
+  .card.warn { border-color: #713f12; background: #1a1408; }
+  .card.bad { border-color: #7f1d1d; background: #1a0d0d; }
+  .status-line {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin-bottom: 10px;
+  }
+  .badge {
+    display: inline-flex;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.9rem;
+    flex-shrink: 0;
+  }
+  .badge.ok { background: #22c55e; color: #06130a; }
+  .badge.warn { background: #f59e0b; color: #1a1408; }
+  .badge.bad { background: #ef4444; color: #1a0d0d; }
+  p.explain {
+    color: #cbd5e1;
+    line-height: 1.5;
+    margin: 0 0 18px;
+  }
+  a.explorer-link {
+    display: inline-block;
+    background: #22d3ee;
+    color: #06131a;
+    text-decoration: none;
+    font-weight: 600;
+    padding: 10px 16px;
+    border-radius: 8px;
+  }
+  .meta {
+    margin-top: 16px;
+    font-size: 0.8rem;
+    color: #64748b;
+    word-break: break-all;
+  }
+  .meta div { margin-bottom: 4px; }
+  footer {
+    margin-top: 32px;
+    font-size: 0.8rem;
+    color: #475569;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Case Verification</h1>
+  <p class="subtitle">Enter a BorderMesh case number to check whether its record was independently sealed on a public blockchain.</p>
+
+  <form id="verify-form">
+    <input type="text" id="case-input" placeholder="e.g. BM-2026-A1B2C" autocomplete="off" autocapitalize="characters" />
+    <button type="submit" id="verify-btn">Verify</button>
+  </form>
+
+  <div id="result"></div>
+
+  <footer>No login required. This page only proves a case's audit record was sealed — it never shows case details.</footer>
+</main>
+
+<script>
+  const form = document.getElementById('verify-form');
+  const input = document.getElementById('case-input');
+  const btn = document.getElementById('verify-btn');
+  const resultEl = document.getElementById('result');
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+  }
+
+  function render(data) {
+    if (!data.case_found) {
+      resultEl.innerHTML = `
+        <div class="card bad">
+          <div class="status-line"><span class="badge bad">!</span> Case not found</div>
+          <p class="explain">We couldn't find a case with that number. Double-check it and try again.</p>
+        </div>`;
+      return;
+    }
+
+    if (!data.chain_valid) {
+      resultEl.innerHTML = `
+        <div class="card bad">
+          <div class="status-line"><span class="badge bad">!</span> Verification failed</div>
+          <p class="explain">${escapeHtml(data.message)}</p>
+        </div>`;
+      return;
+    }
+
+    if (!data.anchored) {
+      resultEl.innerHTML = `
+        <div class="card warn">
+          <div class="status-line"><span class="badge warn">i</span> Not yet published</div>
+          <p class="explain">${escapeHtml(data.message)}</p>
+        </div>`;
+      return;
+    }
+
+    const a = data.anchor;
+    const when = new Date(a.created_at).toLocaleString();
+    resultEl.innerHTML = `
+      <div class="card ok">
+        <div class="status-line"><span class="badge ok">&#10003;</span> Verified on ${escapeHtml(a.network)}</div>
+        <p class="explain">This case's record was cryptographically sealed and published to a public blockchain on ${escapeHtml(when)}. Anyone can independently confirm this on a public block explorer &mdash; no need to trust BorderMesh at all.</p>
+        <a class="explorer-link" href="${a.explorer_url}" target="_blank" rel="noopener noreferrer">View transaction on block explorer &rarr;</a>
+        <div class="meta">
+          <div>Transaction: ${escapeHtml(a.tx_hash)}</div>
+          <div>Sealed record hash: ${escapeHtml(a.head_hash)}</div>
+        </div>
+      </div>`;
+  }
+
+  async function verify(caseNumber) {
+    resultEl.innerHTML = '';
+    btn.disabled = true;
+    btn.textContent = 'Checking…';
+    try {
+      const res = await fetch(`/api/audit/anchor-proof/${encodeURIComponent(caseNumber)}`);
+      const data = await res.json();
+      render(data);
+    } catch (err) {
+      resultEl.innerHTML = `
+        <div class="card bad">
+          <div class="status-line"><span class="badge bad">!</span> Something went wrong</div>
+          <p class="explain">Could not reach the verification service. Please try again shortly.</p>
+        </div>`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Verify';
+    }
+  }
+
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const val = input.value.trim();
+    if (val) verify(val);
+  });
+
+  const params = new URLSearchParams(window.location.search);
+  const prefill = params.get('case');
+  if (prefill) {
+    input.value = prefill;
+    verify(prefill);
+  }
+</script>
+</body>
+</html>

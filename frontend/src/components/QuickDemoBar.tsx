@@ -20,6 +20,7 @@ export const QuickDemoBar: React.FC<QuickDemoBarProps> = ({ onScenarioLoaded }) 
     { key: 'pan_card', label: '7. PAN Card Verification', desc: 'Genuine PAN, structural format check passes, entity type decoded' },
     { key: 'driving_license', label: '8. Driving Licence — Expired', desc: 'No MRZ, but a genuine printed expiry the rules engine now checks' },
     { key: 'voter_id', label: '9. Voter ID (EPIC) Verification', desc: 'Genuine EPIC, structural format check passes' },
+    { key: 'duplicate_identity', label: '10. Duplicate Identity Detection', desc: 'Two different fabricated identities, same real face — caught by cross-case gallery match' },
   ];
 
   const handleRun = async () => {

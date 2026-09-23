@@ -23,6 +23,19 @@ export interface ChainVerificationResult {
   reason?: string;
 }
 
+export interface BlockchainAnchor {
+  id: string;
+  head_hash: string;
+  total_records_at_anchor: number;
+  network: string;
+  chain_id: number;
+  tx_hash: string;
+  block_number?: number;
+  explorer_url: string;
+  anchored_by: string;
+  created_at: string;
+}
+
 export interface RiskSignal {
   id?: string;
   case_id?: string;

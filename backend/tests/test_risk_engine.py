@@ -173,6 +173,58 @@ def test_risk_engine_discounts_face_weight_for_large_age_gap():
     assert age_gap_signals[0]["score_impact"] == 0.0
 
 
+def test_risk_engine_does_not_discount_face_weight_for_a_genuine_mismatch():
+    """
+    Reproduces a real gap: the age-gap discount fired regardless of the
+    face module's own verdict, so a GENUINE mismatch (REVIEW_REQUIRED) on
+    an old document got its weight cut exactly like a merely-uncertain
+    MATCH would -- softening the one signal that actually caught an
+    impersonator, rather than a case where the system is uncertain solely
+    because of aging. The aging rationale (documented on the discount
+    itself) only supports discounting a borderline SIMILARITY SCORE,
+    never a case where face verification already returned an affirmative
+    mismatch/no-face verdict.
+
+    Concrete before/after, same MRZ age-gap setup as
+    test_risk_engine_discounts_face_weight_for_large_age_gap (effective
+    gap ~9.6 years -> the 50% discount tier), with an otherwise clean,
+    moderate-tamper, single-consistency-flag case chosen so the total
+    composite score straddles the real HIGH/MEDIUM boundary (default
+    threshold_medium=49):
+      - undiscounted: 21.0 (tamper) + 25.5 (face, undiscounted 0.30 * 85)
+        + 3.0 (consistency) = 49.5 -> HIGH ("SECONDARY INSPECTION")
+      - buggy discount applied: 21.0 + 12.75 (0.15 * 85) + 3.0 = 36.75
+        -> MEDIUM ("ROUTINE VERIFICATION") -- a real impersonation case
+        silently downgraded out of secondary inspection.
+    """
+    engine = RiskEngine()
+    today = date.today()
+    mrz_data = {
+        "is_valid": True,
+        "birth_date": _yymmdd(today.replace(year=today.year - 11)),
+        "expiry_date": _yymmdd(today.replace(year=today.year - 1)),
+    }
+    validation_data = {"passed_count": 4, "failed_count": 1, "signals": []}
+    tamper_data = {"tamper_risk": 0.70, "signals": []}
+    face_data = {"similarity": 0.15, "status": "REVIEW_REQUIRED", "signals": []}
+
+    result = engine.calculate(
+        mrz_data=mrz_data,
+        validation_data=validation_data,
+        tamper_data=tamper_data,
+        face_data=face_data,
+        watchlist_match=None
+    )
+
+    face_entry = next(b for b in result["breakdown"] if b["factor"] == "Biometric Face Verification")
+    assert face_entry["weight"] == engine.w_face  # undiscounted -- this is a real mismatch, not aging uncertainty
+    assert not [s for s in result["signals"] if s["module"] == "FACE" and "Age-Gap" in s["signal"]]
+
+    assert result["risk_score"] == 49.5
+    assert result["risk_level"] == "HIGH"
+    assert "SECONDARY INSPECTION" in result["recommendation"]
+
+
 def test_risk_engine_no_age_gap_discount_for_recent_adult_document():
     """Regression guard: a normal, recently-issued adult document must not
     trigger any face-weight discount or explanatory signal."""

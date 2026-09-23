@@ -1,10 +1,61 @@
 @import "tailwindcss";
 
+@theme {
+  /* Warm charcoal base/surface/border/text scale -- replaces the default
+     cool blue-gray `slate` throughout the app. Anchored on the base
+     document-examiner-desk background (950) and panel surface (900). */
+  --color-graphite-50: #F6F5F3;
+  --color-graphite-100: #EBE9E5;
+  --color-graphite-200: #D6D3CC;
+  --color-graphite-300: #B8B3A8;
+  --color-graphite-400: #8C8579;
+  --color-graphite-500: #6B655A;
+  --color-graphite-600: #524D44;
+  --color-graphite-700: #3D3933;
+  --color-graphite-800: #2A2825;
+  --color-graphite-900: #1F1E1C;
+  --color-graphite-950: #17171A;
+
+  /* Warm brass/amber -- primary accent. Evocative of ink stamps and
+     security seals, not a generic neon/violet gradient. */
+  --color-brass-50: #FBF6EA;
+  --color-brass-100: #F5EACC;
+  --color-brass-200: #EAD59B;
+  --color-brass-300: #DDBD73;
+  --color-brass-400: #D3AE5E;
+  --color-brass-500: #C9A24D;
+  --color-brass-600: #B08A3B;
+  --color-brass-700: #8C6D2E;
+  --color-brass-800: #6B5324;
+  --color-brass-900: #4F3D1B;
+  --color-brass-950: #332811;
+
+  /* Muted teal -- secondary accent, used sparingly for interactive
+     elements only (never a primary CTA or the dominant color of a view). */
+  --color-teal-50: #EEF5F4;
+  --color-teal-100: #D7E6E4;
+  --color-teal-200: #B0CDC9;
+  --color-teal-300: #83B0AA;
+  --color-teal-400: #5C948C;
+  --color-teal-500: #497B74;
+  --color-teal-600: #3D6B66;
+  --color-teal-700: #2F5450;
+  --color-teal-800: #24403D;
+  --color-teal-900: #1A2F2D;
+  --color-teal-950: #101F1D;
+
+  /* IBM Plex Sans for UI/body/headings; IBM Plex Mono reserved for
+     genuinely machine-readable data (MRZ text, hashes, case IDs,
+     timestamps) -- never general UI chrome. Loaded in index.html. */
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas, monospace;
+}
+
 @layer base {
   body {
-    background-color: #0b0f19;
-    color: #e2e8f0;
-    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    background-color: var(--color-graphite-950);
+    color: var(--color-graphite-100);
+    font-family: var(--font-sans);
     margin: 0;
     min-height: 100vh;
     -webkit-font-smoothing: antialiased;
@@ -16,13 +67,13 @@
     height: 6px;
   }
   ::-webkit-scrollbar-track {
-    background: #090d16;
+    background: var(--color-graphite-950);
   }
   ::-webkit-scrollbar-thumb {
-    background: #1e293b;
+    background: var(--color-graphite-700);
     border-radius: 3px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: #334155;
+    background: var(--color-graphite-600);
   }
 }

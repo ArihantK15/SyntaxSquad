@@ -35,10 +35,10 @@ export const ProcessingPipeline: React.FC<ProcessingPipelineProps> = ({
             st.status === 'completed'
               ? 'bg-emerald-500 border-emerald-500 text-white'
               : st.status === 'running'
-              ? 'bg-cyan-600 border-cyan-600 text-white'
+              ? 'bg-brass-600 border-brass-600 text-white'
               : st.status === 'error'
               ? 'bg-rose-600 border-rose-600 text-white'
-              : 'bg-slate-900 border-slate-700 text-slate-500';
+              : 'bg-graphite-900 border-graphite-700 text-graphite-500';
 
           return (
             <div key={st.id} className="flex sm:flex-1 sm:flex-col items-start sm:items-center gap-3 sm:gap-2">
@@ -61,7 +61,7 @@ export const ProcessingPipeline: React.FC<ProcessingPipelineProps> = ({
                   {!isLast && (
                     <div
                       className={`hidden sm:block h-px flex-1 ${
-                        st.status === 'completed' ? 'bg-emerald-500/50' : 'bg-slate-800'
+                        st.status === 'completed' ? 'bg-emerald-500/50' : 'bg-graphite-800'
                       }`}
                     />
                   )}
@@ -73,17 +73,17 @@ export const ProcessingPipeline: React.FC<ProcessingPipelineProps> = ({
                 <div className="flex items-center sm:justify-center gap-1.5">
                   <span
                     className={`text-xs font-medium ${
-                      st.status === 'pending' ? 'text-slate-500' : 'text-slate-200'
+                      st.status === 'pending' ? 'text-graphite-500' : 'text-graphite-200'
                     }`}
                   >
                     {st.name}
                   </span>
                   {st.latencyMs !== undefined && (
-                    <span className="text-[11px] text-slate-500">{Math.round(st.latencyMs)}ms</span>
+                    <span className="text-[11px] text-graphite-500">{Math.round(st.latencyMs)}ms</span>
                   )}
                 </div>
                 {st.detail && (
-                  <p className="text-xs text-slate-500 mt-0.5 sm:max-w-[10rem] sm:mx-auto" title={st.detail}>
+                  <p className="text-xs text-graphite-500 mt-0.5 sm:max-w-[10rem] sm:mx-auto" title={st.detail}>
                     {st.detail}
                   </p>
                 )}
@@ -91,7 +91,7 @@ export const ProcessingPipeline: React.FC<ProcessingPipelineProps> = ({
 
               {/* Vertical connector for the mobile/stacked layout */}
               {!isLast && (
-                <div className="sm:hidden w-px self-stretch bg-slate-800 ml-3.5" />
+                <div className="sm:hidden w-px self-stretch bg-graphite-800 ml-3.5" />
               )}
             </div>
           );

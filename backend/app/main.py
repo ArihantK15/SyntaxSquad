@@ -66,6 +66,13 @@ uploads_path = os.path.abspath(settings.UPLOAD_DIR)
 os.makedirs(uploads_path, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=uploads_path), name="uploads")
 
+# Standalone public case-verification page (plain HTML/JS, no React/build step,
+# no login) -- backed by the no-auth GET /api/audit/anchor-proof/{case_number}
+# endpoint. html=True serves static/verify/index.html at both /verify and
+# /verify/, and lets ?case=... be read client-side without any server routing.
+verify_page_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "static", "verify"))
+app.mount("/verify", StaticFiles(directory=verify_page_path, html=True), name="verify-page")
+
 # Include Routers
 app.include_router(health.router, prefix=settings.API_V1_STR)
 app.include_router(screening.router, prefix=settings.API_V1_STR)

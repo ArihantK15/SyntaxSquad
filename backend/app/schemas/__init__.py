@@ -46,6 +46,22 @@ class BlockchainAnchorOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class CaseAnchorProofOut(BaseModel):
+    """
+    Response for the public, unauthenticated case-anchor-proof endpoint --
+    deliberately minimal. Must never carry anything beyond proof that a
+    case's audit trail was (or wasn't) anchored: no risk score, name,
+    document number, or any other case field. See
+    AuditService.get_case_anchor_proof.
+    """
+    case_number: str
+    case_found: bool
+    chain_valid: bool
+    anchored: bool
+    anchor: Optional[BlockchainAnchorOut] = None
+    message: str
+
+
 class PurgeBiometricsResponse(BaseModel):
     case_id: str
     message: str

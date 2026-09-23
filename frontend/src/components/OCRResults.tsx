@@ -13,7 +13,7 @@ export const OCRResults: React.FC<OCRResultsProps> = ({ data }) => {
 
   if (!data) {
     return (
-      <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 text-center text-xs text-slate-500 font-mono">
+      <div className="p-4 rounded-xl bg-graphite-900/60 border border-graphite-800 text-center text-xs text-graphite-500">
         No OCR extraction data recorded.
       </div>
     );
@@ -38,21 +38,21 @@ export const OCRResults: React.FC<OCRResultsProps> = ({ data }) => {
   const confPercent = Math.round(data.confidence * 100);
 
   return (
-    <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 backdrop-blur space-y-4">
+    <div className="bg-graphite-900/80 border border-graphite-800 rounded-xl p-5 backdrop-blur space-y-4">
       <SectionHeading
         level="h3"
         title="OCR extraction"
-        icon={<FileText className="w-4 h-4 text-slate-500" />}
+        icon={<FileText className="w-4 h-4 text-graphite-500" />}
         action={
           <div className="flex items-center gap-2">
             {data.fields.document_type && (
-              <span className="text-xs font-semibold text-slate-300 px-2 py-0.5 rounded bg-slate-800 border border-slate-700">
+              <span className="text-xs font-semibold text-graphite-300 px-2 py-0.5 rounded bg-graphite-800 border border-graphite-700">
                 {data.fields.document_type}
               </span>
             )}
             <div className="flex items-center gap-2">
-              <span className="text-[11px] text-slate-500">Confidence:</span>
-              <span className="text-xs font-semibold text-slate-200 px-2 py-0.5 rounded bg-slate-800 border border-slate-700">
+              <span className="text-[11px] text-graphite-500">Confidence:</span>
+              <span className="text-xs font-semibold text-graphite-200 px-2 py-0.5 rounded bg-graphite-800 border border-graphite-700">
                 {confPercent}%
               </span>
             </div>
@@ -63,11 +63,11 @@ export const OCRResults: React.FC<OCRResultsProps> = ({ data }) => {
       {/* Field Grid */}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
         {fields.map((f, i) => (
-          <div key={i} className="p-2.5 rounded-lg bg-slate-950/70 border border-slate-800/80">
-            <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider block">
+          <div key={i} className="p-2.5 rounded-lg bg-graphite-950/70 border border-graphite-800/80">
+            <span className="text-[10px] text-graphite-400 uppercase tracking-wider block">
               {f.label}
             </span>
-            <span className="text-xs font-mono font-medium text-slate-200 truncate block mt-0.5">
+            <span className="text-xs font-mono font-medium text-graphite-200 truncate block mt-0.5">
               {f.value}
             </span>
           </div>
@@ -75,10 +75,10 @@ export const OCRResults: React.FC<OCRResultsProps> = ({ data }) => {
       </div>
 
       {/* Raw Text Accordion */}
-      <div className="pt-2 border-t border-slate-800/80">
+      <div className="pt-2 border-t border-graphite-800/80">
         <button
           onClick={() => setShowRaw(!showRaw)}
-          className="flex items-center justify-between w-full text-xs font-mono text-slate-400 hover:text-slate-200 transition-colors py-1 cursor-pointer"
+          className="flex items-center justify-between w-full text-xs text-graphite-400 hover:text-graphite-200 transition-colors py-1 cursor-pointer"
         >
           <span>Raw Extracted OCR Buffer ({data.detected_lines?.length ?? 0} lines)</span>
           {showRaw ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
@@ -86,12 +86,12 @@ export const OCRResults: React.FC<OCRResultsProps> = ({ data }) => {
 
         {showRaw && (
           <div className="mt-2 relative">
-            <pre className="p-3 rounded-lg bg-slate-950 text-slate-300 font-mono text-[11px] leading-relaxed overflow-x-auto max-h-48 border border-slate-800 select-all">
+            <pre className="p-3 rounded-lg bg-graphite-950 text-graphite-300 font-mono text-[11px] leading-relaxed overflow-x-auto max-h-48 border border-graphite-800 select-all">
               {data.raw_text}
             </pre>
             <button
               onClick={handleCopy}
-              className="absolute top-2 right-2 p-1.5 rounded bg-slate-800/80 hover:bg-slate-700 text-slate-300 text-xs flex items-center gap-1 cursor-pointer"
+              className="absolute top-2 right-2 p-1.5 rounded bg-graphite-800/80 hover:bg-graphite-700 text-graphite-300 text-xs flex items-center gap-1 cursor-pointer"
               title="Copy raw text"
             >
               {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}

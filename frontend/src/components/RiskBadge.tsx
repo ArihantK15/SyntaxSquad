@@ -10,7 +10,7 @@ interface RiskBadgeProps {
 export const RiskBadge: React.FC<RiskBadgeProps> = ({ level, status, size = 'md' }) => {
   const text = level || status || 'UNKNOWN';
 
-  let colorClasses = 'bg-slate-800/80 text-slate-300 border-slate-700';
+  let colorClasses = 'bg-graphite-800/80 text-graphite-300 border-graphite-700';
 
   if (text === 'LOW' || text === 'CLEARED' || text === 'LOW_RISK' || text === 'MATCH') {
     colorClasses = 'bg-emerald-950/60 text-emerald-300 border-emerald-500/40';
@@ -21,7 +21,7 @@ export const RiskBadge: React.FC<RiskBadgeProps> = ({ level, status, size = 'md'
   } else if (text === 'CRITICAL' || text === 'ESCALATED' || text === 'REJECT') {
     colorClasses = 'bg-rose-950/60 text-rose-300 border-rose-500/50';
   } else if (text === 'PROCESSING') {
-    colorClasses = 'bg-cyan-950/60 text-cyan-300 border-cyan-500/40 animate-pulse';
+    colorClasses = 'bg-brass-950/60 text-brass-300 border-brass-500/40 animate-pulse';
   }
 
   const sizeClasses = {
@@ -33,7 +33,7 @@ export const RiskBadge: React.FC<RiskBadgeProps> = ({ level, status, size = 'md'
   const formatted = text.replace(/_/g, ' ');
 
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full font-mono font-semibold tracking-wider uppercase border ${colorClasses} ${sizeClasses}`}>
+    <span className={`inline-flex items-center gap-1.5 rounded-full font-semibold tracking-wider uppercase border ${colorClasses} ${sizeClasses}`}>
       <span className="h-1.5 w-1.5 rounded-full bg-current"></span>
       {formatted}
     </span>

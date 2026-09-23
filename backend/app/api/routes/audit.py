@@ -5,7 +5,7 @@ from typing import Optional, List, Dict, Any
 
 from app.api.deps import get_db, require_officer_auth
 from app.models import AuditLog, BlockchainAnchor
-from app.schemas import AuditLogOut, ChainVerificationOut, BlockchainAnchorOut
+from app.schemas import AuditLogOut, ChainVerificationOut, BlockchainAnchorOut, CaseAnchorProofOut
 from app.services.audit_service import AuditService
 from app.services.blockchain_anchor_service import get_blockchain_anchor_service, AnchorConfigurationError
 
@@ -121,6 +121,19 @@ def anchor_audit_chain(db: Session = Depends(get_db), _auth: None = Depends(requ
     db.commit()
     db.refresh(record)
     return record
+
+
+@router.get("/anchor-proof/{case_number}", response_model=CaseAnchorProofOut)
+def get_case_anchor_proof(case_number: str, db: Session = Depends(get_db)):
+    """
+    Public, unauthenticated proof-of-anchoring lookup, keyed by a case's
+    human-facing case_number (e.g. "BM-2026-A1B2C") -- backs a standalone
+    verification page meant for anyone (no login) to confirm a case's
+    audit trail was anchored to a public blockchain, without exposing
+    anything about the case itself. See AuditService.get_case_anchor_proof
+    for how anchor coverage is determined.
+    """
+    return AuditService.get_case_anchor_proof(db, case_number)
 
 
 @router.get("/anchors", response_model=List[BlockchainAnchorOut])

@@ -600,6 +600,104 @@ def test_anchor_audit_chain_surfaces_network_failure_as_502(monkeypatch):
     assert res.status_code == 502
 
 
+def test_case_anchor_proof_returns_not_found_for_unknown_case_number():
+    res = client.get("/api/audit/anchor-proof/BM-2026-NOPE1")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["case_found"] is False
+    assert data["anchored"] is False
+    assert data["anchor"] is None
+
+
+def test_case_anchor_proof_reports_not_yet_anchored_when_no_covering_anchor_exists():
+    demo_res = client.post("/api/demo/scenario", json={"scenario_key": "genuine"})
+    case_id = demo_res.json()["case_id"]
+    case_number = client.get(f"/api/cases/{case_id}").json()["case_number"]
+
+    res = client.get(f"/api/audit/anchor-proof/{case_number}")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["case_found"] is True
+    assert data["chain_valid"] is True
+    assert data["anchored"] is False
+    assert data["anchor"] is None
+
+
+def test_case_anchor_proof_reports_anchored_when_a_covering_anchor_exists(monkeypatch):
+    fake = _FakeAnchorService()
+    monkeypatch.setattr("app.api.routes.audit.get_blockchain_anchor_service", lambda: fake)
+
+    demo_res = client.post("/api/demo/scenario", json={"scenario_key": "genuine"})
+    case_id = demo_res.json()["case_id"]
+    case_number = client.get(f"/api/cases/{case_id}").json()["case_number"]
+
+    anchor_res = client.post("/api/audit/anchor", headers=OFFICER_AUTH_HEADERS)
+    assert anchor_res.status_code == 200
+
+    res = client.get(f"/api/audit/anchor-proof/{case_number}")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["case_found"] is True
+    assert data["anchored"] is True
+    assert data["anchor"]["tx_hash"] == anchor_res.json()["tx_hash"]
+    assert data["anchor"]["explorer_url"] == anchor_res.json()["explorer_url"]
+    assert data["anchor"]["network"] == "Ethereum Sepolia"
+
+
+def test_case_anchor_proof_requires_no_authentication():
+    """The whole point of this endpoint is a public, no-login verification
+    page -- a bare, credential-free request must succeed."""
+    demo_res = client.post("/api/demo/scenario", json={"scenario_key": "genuine"})
+    case_id = demo_res.json()["case_id"]
+    case_number = client.get(f"/api/cases/{case_id}").json()["case_number"]
+
+    res = client.get(f"/api/audit/anchor-proof/{case_number}")
+    assert res.status_code == 200
+
+
+def test_case_anchor_proof_never_leaks_sensitive_case_data():
+    """
+    This endpoint is public and unauthenticated by design -- it must prove
+    ONLY that a case's audit trail was anchored, never surface the case's
+    risk score, name, or document number. This is the one thing that must
+    never regress here.
+    """
+    demo_res = client.post("/api/demo/scenario", json={"scenario_key": "genuine"})
+    case_id = demo_res.json()["case_id"]
+    detail = client.get(f"/api/cases/{case_id}").json()
+    case_number = detail["case_number"]
+
+    res = client.get(f"/api/audit/anchor-proof/{case_number}")
+    assert res.status_code == 200
+    raw_body = res.text
+
+    # "genuine" scenario's identity -- see demo.py's SCENARIO_CONFIGS.
+    assert "KAUL" not in raw_body
+    assert "ARIHANT" not in raw_body
+    assert "X1234567" not in raw_body  # doc_number
+    assert str(detail["document_number_hash"]) not in raw_body
+
+    forbidden_keys = {
+        "risk_score", "risk_level", "full_name", "document_number",
+        "document_number_hash", "officer_notes", "recommendation",
+        "status", "country", "officer_decision"
+    }
+    assert forbidden_keys.isdisjoint(res.json().keys())
+
+
+def test_public_verification_page_is_served_standalone_with_no_auth():
+    """
+    The standalone verification page (app/static/verify/index.html) must be
+    reachable with a bare, credential-free request -- it's the whole point
+    of a no-login public page -- and must actually call the anchor-proof
+    endpoint rather than some other path.
+    """
+    res = client.get("/verify/")
+    assert res.status_code == 200
+    assert "text/html" in res.headers["content-type"]
+    assert "/api/audit/anchor-proof/" in res.text
+
+
 def test_biometrics_purge_protocol():
     # Execute a demo scenario to create fresh case
     demo_res = client.post("/api/demo/scenario", json={"scenario_key": "genuine"})

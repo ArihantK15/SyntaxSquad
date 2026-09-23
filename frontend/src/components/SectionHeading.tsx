@@ -23,8 +23,8 @@ export const SectionHeading: React.FC<SectionHeadingProps> = ({
 }) => {
   const titleClasses =
     level === 'h1'
-      ? 'text-lg font-semibold text-slate-100'
-      : 'text-sm font-semibold text-slate-200';
+      ? 'text-lg font-semibold text-graphite-100'
+      : 'text-sm font-semibold text-graphite-200';
 
   const Tag = level;
 
@@ -36,7 +36,7 @@ export const SectionHeading: React.FC<SectionHeadingProps> = ({
           {title}
         </Tag>
         {description && (
-          <p className="text-sm text-slate-500 mt-0.5">{description}</p>
+          <p className="text-sm text-graphite-500 mt-0.5">{description}</p>
         )}
       </div>
       {action && <div className="shrink-0">{action}</div>}
