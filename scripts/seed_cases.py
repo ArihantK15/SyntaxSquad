@@ -11,6 +11,7 @@ sys.path.insert(0, str(backend_path))
 
 from app.core.config import settings
 from app.core.database import SessionLocal, Base, engine
+from app.core.encryption import encrypt_file_in_place
 from app.models import Case, DocumentAnalysis, RiskSignal, AuditLog
 from app.services.audit_service import AuditService
 from app.core.security import hash_identifier
@@ -88,6 +89,18 @@ def seed_initial_cases(db=None):
                 expiry_yymmdd=p["exp"],
                 sex=p["sex"]
             )
+            # generate_document() (unaware encryption exists, same as every
+            # other caller of it -- screening.py, demo.py) just wrote a
+            # plaintext JPEG straight to doc_path. Every other seeded-case
+            # write site in this app converts to ciphertext immediately
+            # after generation; this one didn't, which left every startup-
+            # seeded case's document image as a plaintext file under
+            # UPLOAD_DIR and made it un-fetchable through main.py's
+            # decrypt-on-read /uploads route (InvalidToken trying to
+            # Fernet-decrypt a plain JPEG) -- see
+            # backend/tests/test_seed_cases.py's own regression test for
+            # this exact bug.
+            encrypt_file_in_place(doc_path)
 
             # Recommendations
             rec_map = {

@@ -1131,3 +1131,62 @@ def test_upload_survives_a_random_case_number_collision(tmp_path, monkeypatch):
     assert upload_resp.json()["case_number"] != f"BM-2026-{colliding_number_suffix}"
     assert call_count["n"] >= 2
 
+
+def test_uploaded_document_is_encrypted_on_disk_and_served_decrypted(tmp_path):
+    """
+    End-to-end check of the encryption-at-rest path through the REAL HTTP
+    routes (upload -> GET the returned document_image_url), not just the
+    encryption module's own unit tests (test_encryption.py) or a service
+    called directly. This is the one thing those tests can't catch: that
+    the actual on-disk file under UPLOAD_DIR is ciphertext, and that the
+    decrypt-then-stream /uploads route (main.py, replacing the old raw
+    StaticFiles mount) actually hands back the original bytes over a real
+    request.
+    """
+    import os
+    from PIL import Image
+
+    img_path = tmp_path / "encryption_check.jpg"
+    Image.new("RGB", (64, 64), "white").save(img_path)
+    with open(img_path, "rb") as f:
+        original_bytes = f.read()
+
+    upload_resp = client.post(
+        "/api/screening/upload",
+        files={"file": ("encryption_check.jpg", open(img_path, "rb"), "image/jpeg")},
+        data={"document_type": "Passport", "country": "Unknown"},
+    )
+    assert upload_resp.status_code == 200
+    document_image_url = upload_resp.json()["document_image_url"]
+
+    # The file on disk must NOT be the plaintext JPEG that was uploaded --
+    # this is what "encrypted at rest" actually means, checked against the
+    # real file the real route wrote, not a mock.
+    on_disk_path = os.path.join(settings.UPLOAD_DIR, document_image_url.removeprefix("/uploads/"))
+    with open(on_disk_path, "rb") as f:
+        on_disk_bytes = f.read()
+    assert on_disk_bytes != original_bytes
+    assert not on_disk_bytes.startswith(b"\xff\xd8")  # not a plaintext JPEG
+
+    # But fetching it back through the real decrypt-then-stream route must
+    # reproduce the exact original bytes -- the whole point of encrypting
+    # transparently is that nothing else in the app needs to change.
+    fetch_resp = client.get(document_image_url)
+    assert fetch_resp.status_code == 200
+    assert fetch_resp.content == original_bytes
+    assert fetch_resp.headers["content-type"] == "image/jpeg"
+
+
+def test_uploads_route_rejects_path_traversal():
+    """The decrypt-then-stream /uploads route re-implements the
+    path-containment check StaticFiles used to provide for free -- confirm
+    a "../" segment attempting to escape UPLOAD_DIR is rejected, not
+    silently resolved and decrypted."""
+    resp = client.get("/uploads/../../app/main.py")
+    assert resp.status_code == 404
+
+
+def test_uploads_route_404s_for_a_nonexistent_file():
+    resp = client.get("/uploads/documents/does-not-exist.jpg")
+    assert resp.status_code == 404
+
