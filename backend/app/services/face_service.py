@@ -223,6 +223,39 @@ class FaceVerificationService(BaseFaceService):
                 "explanation": "Live facial capture exhibits suboptimal lighting or motion blur.",
                 "score_impact": 5.0
             })
+        # FFT-based moire/halftone signal (FaceDetectorAndVerifier.analyze_
+        # frequency_artifacts, see its own docstring) -- the first time
+        # anything liveness/anti-spoofing-related has actually reached
+        # risk_engine.py as a signal; anti_spoofing_score/liveness_score
+        # existed before this but was never wired into a signal the risk
+        # engine ingests. LOW severity and non-blocking BY DESIGN: it never
+        # changes `is_match`/`status` above, and LOW severity means it can
+        # never trigger risk_engine's CRITICAL-signal floor. This is a
+        # coarse HEURISTIC INDICATOR only -- not a certified Presentation
+        # Attack Detection (PAD) verdict -- validated solely against a
+        # self-generated synthetic proxy (real face crops with a synthetic
+        # moire/halftone pattern overlaid), never against a real spoof
+        # capture (see scripts/check_frequency_liveness_signal.py's own
+        # disclosure). Officer discretion, not an automated block.
+        if quality.get("frequency_artifact_detected"):
+            signals.append({
+                "module": "FACE",
+                "signal": "Possible Screen/Print Recapture Pattern",
+                "severity": "LOW",
+                "confidence": 0.5,
+                "explanation": (
+                    "Frequency-domain analysis of the live capture detected a "
+                    "periodic pattern (moire/halftone-like) more consistent with "
+                    "photographing a screen or a printed photo than a direct live "
+                    "capture. This is a HEURISTIC INDICATOR, not a certified "
+                    "Presentation Attack Detection (PAD) result -- it has only "
+                    "been validated against a synthetic proxy, not real spoof "
+                    "captures (see scripts/check_frequency_liveness_signal.py). "
+                    "Non-blocking: does not affect the match decision above. "
+                    "Officer discretion advised."
+                ),
+                "score_impact": 5.0
+            })
 
         return {
             "similarity": round(similarity, 3),

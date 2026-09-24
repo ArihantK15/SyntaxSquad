@@ -83,6 +83,129 @@ def test_hand_drawn_avatar_is_not_detected_as_a_face():
         assert boxes is None
 
 
+def _apply_synthetic_moire(gray_u8: np.ndarray, freq_cycles: float = 14.0, amplitude: float = 28.0, angle_deg: float = 20.0) -> np.ndarray:
+    """
+    Same construction as scripts/check_frequency_liveness_signal.py's own
+    apply_synthetic_moire (see that script's own disclosure of what this
+    proxy is and is not validated against) -- duplicated here in miniature
+    rather than imported, so this fast/offline pytest suite doesn't depend
+    on the scripts/ directory being importable, mirroring how test_ocr.py
+    etc. don't import from scripts/ either.
+    """
+    h, w = gray_u8.shape
+    yy, xx = np.indices((h, w), dtype=np.float64)
+    theta = np.deg2rad(angle_deg)
+    xr = xx * np.cos(theta) + yy * np.sin(theta)
+    grating = amplitude * np.sin(2 * np.pi * freq_cycles * xr / w)
+    return np.clip(gray_u8.astype(np.float64) + grating, 0, 255).astype(np.uint8)
+
+
+def _apply_synthetic_halftone(gray_u8: np.ndarray, cell_size: float = 7.0, amplitude: float = 45.0, angle_deg: float = 45.0) -> np.ndarray:
+    h, w = gray_u8.shape
+    yy, xx = np.indices((h, w), dtype=np.float64)
+    theta = np.deg2rad(angle_deg)
+    xr = xx * np.cos(theta) - yy * np.sin(theta)
+    yr = xx * np.sin(theta) + yy * np.cos(theta)
+    dot_pattern = np.cos(2 * np.pi * xr / cell_size) * np.cos(2 * np.pi * yr / cell_size)
+    return np.clip(gray_u8.astype(np.float64) + amplitude * dot_pattern, 0, 255).astype(np.uint8)
+
+
+def _person_a_face_crop_bgr() -> np.ndarray:
+    """A real (if AI-generated) face photo, not random noise -- the frequency
+    heuristic's whole premise is that a real face crop's spectrum behaves
+    differently from an injected periodic pattern's, so a meaningful test
+    of it needs real face-like texture, not synthetic noise."""
+    img = cv2.imread(PERSON_A)
+    assert img is not None
+    return img
+
+
+def test_frequency_artifacts_not_detected_on_a_clean_real_face_crop():
+    """
+    Fast, deterministic smoke check on a single real face crop -- the
+    statistical false-positive-rate claim (see
+    FaceDetectorAndVerifier.FREQ_ARTIFACT_CONCENTRATION_THRESHOLD's own
+    comment: 5.4% on n=800 real LFW crops) comes from
+    scripts/check_frequency_liveness_signal.py, not from this test, which
+    only confirms the ordinary/expected case behaves as expected.
+    """
+    result = FaceDetectorAndVerifier.analyze_frequency_artifacts(_person_a_face_crop_bgr())
+    assert result["frequency_artifact_detected"] is False
+
+
+def test_frequency_artifacts_detected_on_synthetic_moire_overlay():
+    """The synthetic-proxy validation this heuristic was actually calibrated
+    against (scripts/check_frequency_liveness_signal.py) -- this is the fast
+    offline version of that same check on a single fixed image, not a
+    substitute for it."""
+    img = _person_a_face_crop_bgr()
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    moire_gray = _apply_synthetic_moire(gray)
+    moire_bgr = cv2.cvtColor(moire_gray, cv2.COLOR_GRAY2BGR)
+
+    result = FaceDetectorAndVerifier.analyze_frequency_artifacts(moire_bgr)
+    assert result["frequency_artifact_detected"] is True
+    assert result["moire_energy_concentration"] > FaceDetectorAndVerifier.FREQ_ARTIFACT_CONCENTRATION_THRESHOLD
+
+
+def test_frequency_artifacts_detected_on_synthetic_halftone_overlay():
+    """
+    Fixed, hand-picked cell_size/amplitude for this single deterministic
+    image (unlike the randomized-per-sample sweep
+    scripts/check_frequency_liveness_signal.py runs across hundreds of real
+    LFW crops) -- halftone recall there was only 41.9% overall, i.e. not
+    every configuration triggers detection even on a real attack; this
+    picks one of the configurations that reliably does on THIS image, to
+    demonstrate the mechanism works at all. The 41.9% recall figure is the
+    honest overall claim, not this test.
+    """
+    img = _person_a_face_crop_bgr()
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    halftone_gray = _apply_synthetic_halftone(gray)
+    halftone_bgr = cv2.cvtColor(halftone_gray, cv2.COLOR_GRAY2BGR)
+
+    result = FaceDetectorAndVerifier.analyze_frequency_artifacts(halftone_bgr)
+    assert result["frequency_artifact_detected"] is True
+    assert result["moire_energy_concentration"] > FaceDetectorAndVerifier.FREQ_ARTIFACT_CONCENTRATION_THRESHOLD
+
+
+def test_frequency_artifacts_handles_an_all_zero_crop_without_crashing():
+    """
+    An all-zero crop is the true zero-energy degenerate case: 0 times the
+    Hann window is still 0 everywhere, so its FFT magnitude is 0 in the
+    band too -- must return a clean not-detected result rather than
+    dividing by zero (total_energy <= 0 short-circuit).
+
+    NOT the same as a uniform mid-gray crop: multiplying a nonzero constant
+    by the Hann window produces the WINDOW's own frequency content (a real,
+    nonzero spectrum, not a degenerate one) -- a genuinely blank live
+    capture would in practice already be caught by check_quality's
+    is_blurry check (zero Laplacian variance) well before this signal is
+    reached.
+    """
+    zeros = np.zeros((160, 160, 3), dtype=np.uint8)
+    result = FaceDetectorAndVerifier.analyze_frequency_artifacts(zeros)
+    assert result["frequency_artifact_detected"] is False
+    assert result["moire_energy_concentration"] == 0.0
+
+
+def test_check_quality_surfaces_frequency_fields_and_discounts_liveness_score():
+    """check_quality (the method face_service.py actually calls) must wire
+    analyze_frequency_artifacts's output through -- both as its own fields
+    and as a discount on the coarse liveness_score heuristic -- not just
+    compute it and drop it."""
+    img = _person_a_face_crop_bgr()
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    moire_bgr = cv2.cvtColor(_apply_synthetic_moire(gray), cv2.COLOR_GRAY2BGR)
+
+    clean_quality = _det.check_quality(img)
+    moire_quality = _det.check_quality(moire_bgr)
+
+    assert clean_quality["frequency_artifact_detected"] is False
+    assert moire_quality["frequency_artifact_detected"] is True
+    assert moire_quality["liveness_score"] < clean_quality["liveness_score"]
+
+
 def test_specimen_with_embedded_real_photo_is_detected_as_a_face():
     """The fix: passing a real face_photo_path makes the portrait region an
     actual detectable, embeddable face."""

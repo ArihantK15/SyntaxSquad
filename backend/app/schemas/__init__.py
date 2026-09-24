@@ -151,6 +151,10 @@ class FaceVerificationOut(BaseModel):
     document_face_url: Optional[str] = None
     live_face_url: Optional[str] = None
     quality_checks: Dict[str, Any] = {}
+    # A coarse HEURISTIC INDICATOR (blur/brightness quality plus an FFT-based
+    # moire/halftone signal, see FaceDetectorAndVerifier.check_quality) --
+    # NOT a certified Presentation Attack Detection (PAD) score. No ISO/IEC
+    # 30107-3 conformant liveness testing has been done on this pipeline.
     anti_spoofing_score: float = 0.95
     match_threshold: float = 0.72
 

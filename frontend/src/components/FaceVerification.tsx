@@ -114,10 +114,16 @@ export const FaceVerification: React.FC<FaceVerificationProps> = ({ faceResult }
           </span>
         </div>
 
-        <div className="p-2 rounded-lg bg-graphite-950 border border-graphite-800 text-[11px]">
-          <span className="text-graphite-400 block text-[10px]">Anti-Spoofing</span>
+        <div
+          className="p-2 rounded-lg bg-graphite-950 border border-graphite-800 text-[11px]"
+          title="Heuristic indicator (blur/brightness + FFT moire/halftone check), not certified Presentation Attack Detection (PAD)"
+        >
+          <span className="text-graphite-400 block text-[10px]">Liveness Heuristic</span>
           <span className="font-semibold text-graphite-200">
-            {Math.round((faceResult.anti_spoofing_score || 0.95) * 100)}% Liveness
+            {Math.round((faceResult.anti_spoofing_score || 0.95) * 100)}%
+          </span>
+          <span className="text-graphite-500 block text-[9px] leading-tight mt-0.5">
+            Heuristic only — not certified PAD
           </span>
         </div>
 
