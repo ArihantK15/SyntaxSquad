@@ -10,6 +10,7 @@ from typing import Dict, Any
 from app.api.deps import get_db
 from app.api.routes.screening import MAX_CASE_NUMBER_ATTEMPTS
 from app.core.config import settings
+from app.core.encryption import encrypt_file_in_place, decrypted_tempfile
 from app.models import Case, DocumentAnalysis, RiskSignal, AuditLog
 from app.utils.synthetic_generator import SyntheticDocumentGenerator
 from app.services.ocr_service import get_ocr_service, TesseractOCRService
@@ -307,6 +308,12 @@ def _execute_scenario(cfg: Dict[str, Any], db: Session, check_duplicate_identity
     live_path = os.path.join(settings.UPLOAD_DIR, "faces", live_filename)
     SyntheticDocumentGenerator.generate_live_face_image(live_path, face_photo_path=cfg["live_face_photo"])
 
+    # The generator (unaware encryption exists) just wrote both files as
+    # plaintext straight to their final resting places -- convert both to
+    # ciphertext in place before anything else touches them.
+    encrypt_file_in_place(doc_path)
+    encrypt_file_in_place(live_path)
+
     # Create Case (case_number retried on the rare unique-constraint
     # collision -- see screening.py's _create_case_with_unique_number for
     # why this matters; a much larger 16^5 space than the manual-upload
@@ -344,44 +351,67 @@ def _execute_scenario(cfg: Dict[str, Any], db: Session, check_duplicate_identity
         # already does per step.
         step_start = time.perf_counter()
 
-        # Step 2: OCR
-        ocr_svc = get_ocr_service()
-        ocr_result = ocr_svc.extract_text(doc_path)
-        AuditService.log(db, "OCR_COMPLETED", case_uid, actor="AI-OCR-ENGINE", metadata={"conf": ocr_result.get("confidence")})
+        # Steps 2-5 all re-read the two files persisted above, which are now
+        # encrypted at rest -- decrypt each once into a plaintext tempfile
+        # and reuse it across every step below (all still within this one
+        # function/request), rather than decrypting redundantly per step.
+        # Neither the OCR/tamper/face services below nor the synthetic
+        # generator above have any idea encryption exists; they only ever
+        # see a plain filesystem path, exactly as before.
+        with decrypted_tempfile(doc_path) as doc_tmp_path, decrypted_tempfile(live_path) as live_tmp_path:
+            # Step 2: OCR
+            ocr_svc = get_ocr_service()
+            ocr_result = ocr_svc.extract_text(doc_tmp_path)
+            AuditService.log(db, "OCR_COMPLETED", case_uid, actor="AI-OCR-ENGINE", metadata={"conf": ocr_result.get("confidence")})
 
-        # Step 3: MRZ & Validation -- prefer the dedicated MRZ-band OCR pass (see
-        # TesseractOCRService.extract_mrz_lines / MRZService.parse_pre_isolated_lines)
-        # over the general whole-document pass, same as the manual screening flow
-        # in screening.py; the general pass misreads the small MRZ font far more.
-        #
-        # Skipped entirely for Aadhaar/PAN/Driving Licence, exactly like
-        # screening.py's own equivalent guard: none of them have an ICAO MRZ
-        # by design, so scanning the bottom band for one anyway risks
-        # fabricating a fake MRZ from the card's own boilerplate/signature
-        # text whose checksums then "fail" against a genuine, unaltered
-        # card -- corrupting the MRZ risk factor for every PAN/DL demo
-        # scenario. This module had no non-passport demo scenario until the
-        # PAN/DL specimens below, so this gap was latent but never
-        # exercised until now.
-        if ocr_result.get("fields", {}).get("document_type") in TesseractOCRService.NON_MRZ_DOCUMENT_TYPES:
-            mrz_data = None
-        else:
-            mrz_lines = ocr_svc.extract_mrz_lines(doc_path) if hasattr(ocr_svc, "extract_mrz_lines") else []
-            mrz_data = (
-                MRZService.parse_pre_isolated_lines(mrz_lines) if len(mrz_lines) >= 2 else None
-            ) or MRZService.extract_mrz_from_lines(ocr_result.get("detected_lines", []))
-        validation_data = DocumentRulesEngine.evaluate(ocr_result, mrz_data)
-        AuditService.log(db, "MRZ_VALIDATED", case_uid, actor="AI-VALIDATION-ENGINE")
+            # Step 3: MRZ & Validation -- prefer the dedicated MRZ-band OCR pass (see
+            # TesseractOCRService.extract_mrz_lines / MRZService.parse_pre_isolated_lines)
+            # over the general whole-document pass, same as the manual screening flow
+            # in screening.py; the general pass misreads the small MRZ font far more.
+            #
+            # Skipped entirely for Aadhaar/PAN/Driving Licence, exactly like
+            # screening.py's own equivalent guard: none of them have an ICAO MRZ
+            # by design, so scanning the bottom band for one anyway risks
+            # fabricating a fake MRZ from the card's own boilerplate/signature
+            # text whose checksums then "fail" against a genuine, unaltered
+            # card -- corrupting the MRZ risk factor for every PAN/DL demo
+            # scenario. This module had no non-passport demo scenario until the
+            # PAN/DL specimens below, so this gap was latent but never
+            # exercised until now.
+            if ocr_result.get("fields", {}).get("document_type") in TesseractOCRService.NON_MRZ_DOCUMENT_TYPES:
+                mrz_data = None
+            else:
+                mrz_lines = ocr_svc.extract_mrz_lines(doc_tmp_path) if hasattr(ocr_svc, "extract_mrz_lines") else []
+                mrz_data = (
+                    MRZService.parse_pre_isolated_lines(mrz_lines) if len(mrz_lines) >= 2 else None
+                ) or MRZService.extract_mrz_from_lines(ocr_result.get("detected_lines", []))
+            validation_data = DocumentRulesEngine.evaluate(ocr_result, mrz_data)
+            AuditService.log(db, "MRZ_VALIDATED", case_uid, actor="AI-VALIDATION-ENGINE")
 
-        # Step 4: Tamper Forensics
-        tamper_svc = get_tamper_service()
-        tamper_result = tamper_svc.analyze(doc_path, case_uid)
-        AuditService.log(db, "TAMPER_ANALYSIS_COMPLETED", case_uid, actor="AI-TAMPER-FORENSICS")
+            # Step 4: Tamper Forensics
+            tamper_svc = get_tamper_service()
+            tamper_result = tamper_svc.analyze(doc_tmp_path, case_uid)
+            AuditService.log(db, "TAMPER_ANALYSIS_COMPLETED", case_uid, actor="AI-TAMPER-FORENSICS")
 
-        # Step 5: Face Verification
-        face_svc = get_face_service()
-        face_result = face_svc.verify(doc_path, live_path, case_uid)
-        AuditService.log(db, "FACE_VERIFIED", case_uid, actor="AI-FACE-VERIFIER")
+            # Step 5: Face Verification
+            face_svc = get_face_service()
+            face_result = face_svc.verify(doc_tmp_path, live_tmp_path, case_uid)
+            AuditService.log(db, "FACE_VERIFIED", case_uid, actor="AI-FACE-VERIFIER")
+
+        # tamper_svc.analyze() and face_svc.verify() each wrote plaintext
+        # artifacts (an ELA heatmap, whichever face crops it managed to
+        # extract) directly to their final on-disk paths -- neither knows
+        # encryption exists. Convert whatever they actually produced (face
+        # crops aren't guaranteed on every code path, e.g. NO_FACE_DETECTED).
+        heatmap_path = os.path.join(settings.UPLOAD_DIR, "heatmaps", f"{case_uid}_tamper_heatmap.jpg")
+        crops_dir = os.path.join(settings.UPLOAD_DIR, "crops")
+        for artifact_path in [
+            heatmap_path,
+            os.path.join(crops_dir, f"{case_uid}_doc_face.jpg"),
+            os.path.join(crops_dir, f"{case_uid}_live_face.jpg"),
+        ]:
+            if os.path.exists(artifact_path):
+                encrypt_file_in_place(artifact_path)
 
         # Step 6: Watchlist, Duplicate Identity & Risk Engine
         full_name = f"{cfg['surname']} {cfg['given_names']}"
@@ -543,6 +573,11 @@ def generate_specimen_doc(
         # app.core.demo_faces for why a real (AI-generated) photo is needed.
         face_photo_path=PERSON_A
     )
+    # The generator just wrote a plaintext file straight to its final
+    # resting place under UPLOAD_DIR -- convert it in place. The frontend's
+    # subsequent fetch(url) is served back as plaintext by the decrypting
+    # /uploads route in main.py, exactly as before.
+    encrypt_file_in_place(out_path)
     return {
         "filename": fname,
         "url": f"/uploads/documents/{fname}",

@@ -122,7 +122,7 @@ export const CaseReportPrintable: React.FC<CaseReportPrintableProps> = ({
       >
         <div style={{ textAlign: 'center', minWidth: 80 }}>
           <div style={{ fontSize: 34, fontWeight: 800, color: theme.text, fontFamily: 'monospace', lineHeight: 1 }}>
-            {Math.round(caseData.risk_score)}
+            {caseData.risk_score.toFixed(1)}
           </div>
           <div style={{ fontSize: 9, color: theme.text, opacity: 0.7 }}>/ 100</div>
         </div>
@@ -284,10 +284,10 @@ export const CaseReportPrintable: React.FC<CaseReportPrintableProps> = ({
             {riskBreakdown.map((item, i) => (
               <tr key={i} style={{ borderTop: '1px solid #F1F5F9' }}>
                 <td style={{ padding: '6px 0', color: '#0F172A', fontWeight: 500 }}>{item.factor}</td>
-                <td style={{ padding: '6px 0', color: '#64748B' }}>{Math.round(item.weight * 100)}%</td>
-                <td style={{ padding: '6px 0', color: '#64748B' }}>{Math.round(item.raw_risk)}%</td>
+                <td style={{ padding: '6px 0', color: '#64748B' }}>{item.weight !== null ? `${Math.round(item.weight * 100)}%` : '—'}</td>
+                <td style={{ padding: '6px 0', color: '#64748B' }}>{item.raw_risk !== null ? `${Math.round(item.raw_risk)}%` : '—'}</td>
                 <td style={{ padding: '6px 0', color: '#0F172A', fontWeight: 700, textAlign: 'right' }}>
-                  +{item.weighted_contribution.toFixed(1)}
+                  {item.weighted_contribution >= 0 ? '+' : ''}{item.weighted_contribution.toFixed(1)}
                 </td>
               </tr>
             ))}

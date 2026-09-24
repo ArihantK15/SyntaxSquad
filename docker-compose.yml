@@ -31,6 +31,13 @@ services:
       - ENVIRONMENT=production
       - DEMO_MODE=true
       - SECRET_KEY=bordermesh-sih2026-demo-secret-key-change-in-production
+      # Symmetric key encrypting biometric artifacts at rest (see
+      # backend/app/core/encryption.py) -- a real Fernet key from an env
+      # var, not hardcoded in source, but still a single static demo key:
+      # no rotation, no envelope encryption, no HSM/KMS. Generated once via
+      # `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`.
+      # Change this in any real deployment.
+      - BIOMETRIC_ENCRYPTION_KEY=GIdlRJ4jkqQin6vgx8uDRtGQ2EXnGhbd_jIXGEjS848=
       - UPLOAD_DIR=/app/uploads
       - OCR_ENGINE=pytesseract
       - TESSERACT_PATH=/usr/bin/tesseract

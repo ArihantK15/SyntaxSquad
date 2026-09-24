@@ -8,6 +8,7 @@ from abc import ABC, abstractmethod
 from typing import Dict, Any, List, Optional
 
 from app.core.config import settings
+from app.utils.text_similarity import levenshtein
 
 class BaseOCRService(ABC):
     @abstractmethod
@@ -199,6 +200,39 @@ class TesseractOCRService(BaseOCRService):
         pattern = re.compile(keyword_pattern, re.IGNORECASE)
         for i, line in enumerate(lines):
             if pattern.search(line) and i + 1 < len(lines):
+                return lines[i + 1].strip()
+        return None
+
+    @staticmethod
+    def _line_matches_label_words(line: str, label_words: List[str]) -> bool:
+        """
+        True if every word in `label_words` (already uppercase) shows up
+        somewhere in `line`, either exactly or as a plausible single-word
+        OCR misread -- reproduces a real failure found on an actual
+        photographed Driving Licence: Tesseract read the genuine printed
+        "VALID TILL" label as "VAUD TILL" (VALID -> VAUD is edit-distance 2:
+        L misread as U, the I dropped entirely), which an exact literal-
+        label match never catches. The edit-distance budget scales with
+        word length (2 for 5+ letters, 1 otherwise) so short label words
+        like "TILL"/"FROM" still need a near-exact match while longer ones
+        tolerate the kind of multi-character slip observed here.
+        """
+        line_words = re.findall(r'[A-Z0-9]+', line.upper())
+        for label_word in label_words:
+            threshold = 2 if len(label_word) >= 5 else 1
+            if not any(
+                w == label_word or levenshtein(w, label_word) <= threshold
+                for w in line_words
+            ):
+                return False
+        return True
+
+    @classmethod
+    def _value_after_fuzzy_label(cls, lines: List[str], label_words: List[str]) -> Optional[str]:
+        """Fallback for _value_after_label when the label itself may be
+        OCR-garbled -- see _line_matches_label_words."""
+        for i, line in enumerate(lines):
+            if cls._line_matches_label_words(line, label_words) and i + 1 < len(lines):
                 return lines[i + 1].strip()
         return None
 
@@ -497,8 +531,14 @@ class TesseractOCRService(BaseOCRService):
         fields["document_number"] = self._extract_dl_number(raw_text)
         fields["full_name"] = self._value_after_label(lines, r"\bNAME\b")
         fields["date_of_birth"] = self._extract_date(self._value_after_label(lines, r'\bDATE OF BIRTH\b'))
-        fields["date_of_issue"] = self._extract_date(self._value_after_label(lines, r'\bVALID FROM\b'))
-        fields["date_of_expiry"] = self._extract_date(self._value_after_label(lines, r'\bVALID TILL\b'))
+        fields["date_of_issue"] = self._extract_date(
+            self._value_after_label(lines, r'\bVALID FROM\b')
+            or self._value_after_fuzzy_label(lines, ["VALID", "FROM"])
+        )
+        fields["date_of_expiry"] = self._extract_date(
+            self._value_after_label(lines, r'\bVALID TILL\b')
+            or self._value_after_fuzzy_label(lines, ["VALID", "TILL"])
+        )
 
         return fields
 

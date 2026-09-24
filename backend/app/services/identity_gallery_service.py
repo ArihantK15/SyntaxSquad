@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.models import FaceEmbeddingGallery
 from app.ml.face_verifier import FaceDetectorAndVerifier
+from app.core.encryption import encrypt_embedding, decrypt_embedding
 
 # Stricter than the 0.72 same-session 1:1 MATCH_THRESHOLD (face_service.py).
 # A 1:N gallery search's false-accept risk compounds across every entry
@@ -52,7 +53,7 @@ class IdentityGalleryService:
             FaceEmbeddingGallery.case_id != exclude_case_id
         ).all()
         for entry in entries:
-            candidate = np.array(entry.embedding, dtype=np.float64)
+            candidate = np.array(decrypt_embedding(entry.embedding), dtype=np.float64)
             similarity = FaceDetectorAndVerifier.compare_faces(query, candidate)
             if similarity >= GALLERY_MATCH_THRESHOLD and (best is None or similarity > best["similarity"]):
                 best = {
@@ -87,7 +88,7 @@ class IdentityGalleryService:
             case_number=case_number,
             full_name=full_name,
             document_number_hash=document_number_hash,
-            embedding=embedding
+            embedding=encrypt_embedding(embedding)
         ))
 
 

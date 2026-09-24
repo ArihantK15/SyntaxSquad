@@ -138,8 +138,12 @@ export interface ValidationResult {
 
 export interface RiskFactorContribution {
   factor: string;
-  weight: number;
-  raw_risk: number;
+  // null for the synthetic "Critical Signal Floor" row the backend adds when
+  // a CRITICAL signal (e.g. a duplicate-identity match) forces the score up
+  // regardless of the weighted math -- that row is a flat point adjustment,
+  // not a proportional weighted category, so it has no weight/raw-risk %.
+  weight: number | null;
+  raw_risk: number | null;
   weighted_contribution: number;
   top_signals: string[];
 }

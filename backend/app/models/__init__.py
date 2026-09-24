@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Float, DateTime, Text, JSON, ForeignKey, Integer, Boolean
+from sqlalchemy import Column, String, Float, DateTime, Text, JSON, ForeignKey, Integer, Boolean, LargeBinary
 from sqlalchemy.orm import relationship
 
 from app.core.database import Base
@@ -145,7 +145,15 @@ class FaceEmbeddingGallery(Base):
     case_number = Column(String(32), nullable=False)
     full_name = Column(String(255), nullable=True)
     document_number_hash = Column(String(64), nullable=True)
-    embedding = Column(JSON, nullable=False)  # 512-d L2-normalized VGGFace2 embedding
+    # Encrypted at rest (see app.core.encryption.encrypt_embedding/
+    # decrypt_embedding, and identity_gallery_service.py, which is the only
+    # code that ever reads/writes this column): a Fernet-encrypted JSON blob
+    # of the 512-d L2-normalized VGGFace2 embedding, not the raw floats.
+    # Was a plaintext JSON column -- this app has no migration tooling
+    # (Base.metadata.create_all only creates missing tables), so an already-
+    # populated DB volume needs recreating, not just upgrading, after this
+    # change.
+    embedding = Column(LargeBinary, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     case = relationship("Case", back_populates="gallery_entries")

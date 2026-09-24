@@ -95,6 +95,62 @@ def test_risk_engine_isolated_critical_signal_floors_to_high():
     assert result["risk_score"] > 49.0
 
 
+def test_risk_engine_breakdown_reconciles_to_total_when_critical_floor_applies():
+    """
+    Reproduces a real credibility gap in the "Explainable risk breakdown"
+    panel: when an isolated CRITICAL signal (e.g. a cross-case duplicate-
+    identity match, which deliberately carries no weighted factor of its
+    own) floors the score, the 5 weighted categories previously summed to
+    far less than the displayed total with no line item accounting for the
+    difference -- in a panel literally named "Explainable". The floor must
+    now appear as its own breakdown entry, named after the triggering
+    signal, whose contribution makes the categories sum back to the total.
+    """
+    engine = RiskEngine()
+    validation_data = {"passed_count": 5, "failed_count": 0, "signals": []}
+    tamper_data = {"tamper_risk": 0.1, "signals": []}
+    face_data = {"similarity": 0.97, "status": "MATCH", "signals": []}
+
+    result = engine.calculate(
+        mrz_data={"is_valid": True},
+        validation_data=validation_data,
+        tamper_data=tamper_data,
+        face_data=face_data,
+        watchlist_match=None,
+        duplicate_identity_match={"case_number": "BM-2026-F0E17", "similarity": 1.0}
+    )
+
+    assert result["critical_floor_applied"] is True
+    floor_entry = next(b for b in result["breakdown"] if b["factor"] == "Critical Signal Floor")
+    assert floor_entry["weight"] is None
+    assert floor_entry["raw_risk"] is None
+    assert any("Duplicate Identity" in s for s in floor_entry["top_signals"])
+
+    reconciled_total = round(sum(b["weighted_contribution"] for b in result["breakdown"]), 1)
+    assert reconciled_total == result["risk_score"]
+
+
+def test_risk_engine_breakdown_has_no_floor_entry_when_floor_not_applied():
+    """A clean/low-risk result must not grow a phantom breakdown row."""
+    engine = RiskEngine()
+    validation_data = {"passed_count": 5, "failed_count": 0, "signals": []}
+    tamper_data = {"tamper_risk": 0.08, "signals": []}
+    face_data = {"similarity": 0.92, "status": "MATCH", "signals": []}
+
+    result = engine.calculate(
+        mrz_data={"is_valid": True},
+        validation_data=validation_data,
+        tamper_data=tamper_data,
+        face_data=face_data,
+        watchlist_match=None
+    )
+
+    assert result["critical_floor_applied"] is False
+    assert all(b["factor"] != "Critical Signal Floor" for b in result["breakdown"])
+    reconciled_total = round(sum(b["weighted_contribution"] for b in result["breakdown"]), 1)
+    assert reconciled_total == result["risk_score"]
+
+
 def test_risk_engine_critical_tamper_verdict_floors_score():
     """
     A tamper_risk that crosses into the tamper service's own CRITICAL tier

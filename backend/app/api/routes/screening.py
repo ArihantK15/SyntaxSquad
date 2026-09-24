@@ -9,6 +9,7 @@ from typing import Optional
 from app.api.deps import get_db
 from app.core.config import settings
 from app.core.security import validate_image_upload, sanitize_filename, hash_identifier
+from app.core.encryption import write_encrypted_file, encrypt_file_in_place, decrypted_tempfile
 from app.models import Case, DocumentAnalysis, RiskSignal, AuditLog
 from app.services.ocr_service import get_ocr_service, TesseractOCRService
 from app.services.mrz_service import MRZService
@@ -68,8 +69,11 @@ async def upload_document(
     # Generate secure filename
     filename = sanitize_filename(file.filename)
     save_path = os.path.join(settings.UPLOAD_DIR, "documents", filename)
-    with open(save_path, "wb") as f:
-        f.write(contents)
+    # Encrypted at rest (see app.core.encryption) -- every later re-read of
+    # this same path (OCR, tamper, face steps) decrypts it back into a
+    # plaintext tempfile first, so this is the only place raw upload bytes
+    # ever touch the filesystem.
+    write_encrypted_file(save_path, contents)
 
     # Create Case in DB (case_number e.g. BM-2026-10482, retried on collision)
     new_case = _create_case_with_unique_number(
@@ -124,26 +128,30 @@ def process_ocr(case_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Document analysis record not found.")
 
     ocr_svc = get_ocr_service()
-    ocr_result = ocr_svc.extract_text(analysis.document_image_path)
+    # Decrypts the stored document once into a plaintext tempfile and hands
+    # that path to the OCR service, completely unaware encryption exists --
+    # reused for both calls below, deleted when this block exits.
+    with decrypted_tempfile(analysis.document_image_path) as doc_tmp_path:
+        ocr_result = ocr_svc.extract_text(doc_tmp_path)
 
-    # Dedicated MRZ-band OCR pass (crop/upscale/binarize + restricted charset),
-    # much more reliable for the small monospace MRZ font than the general
-    # whole-document text pass above. Falls back gracefully if unavailable
-    # (e.g. MockOCRService, which has no extract_mrz_lines method).
-    #
-    # Skipped entirely for Aadhaar/PAN/Driving Licence: none of them have an
-    # ICAO MRZ by design, so this crops the bottom ~30% of the page looking
-    # for one anyway. A real e-Aadhaar PDF/screenshot has a dense English
-    # disclaimer paragraph in exactly that band -- observed live to garble
-    # into text that still passes the "looks MRZ-shaped" heuristic (long
-    # enough, contains '<'), which the MRZ parser then "validates" as a
-    # forged passport MRZ with every checksum failing. Running this pass on
-    # a document that structurally can't have an MRZ only manufactures false
-    # positives.
-    if hasattr(ocr_svc, "extract_mrz_lines") and ocr_result.get("fields", {}).get("document_type") not in TesseractOCRService.NON_MRZ_DOCUMENT_TYPES:
-        ocr_result["mrz_lines"] = ocr_svc.extract_mrz_lines(analysis.document_image_path)
-    else:
-        ocr_result["mrz_lines"] = []
+        # Dedicated MRZ-band OCR pass (crop/upscale/binarize + restricted charset),
+        # much more reliable for the small monospace MRZ font than the general
+        # whole-document text pass above. Falls back gracefully if unavailable
+        # (e.g. MockOCRService, which has no extract_mrz_lines method).
+        #
+        # Skipped entirely for Aadhaar/PAN/Driving Licence: none of them have an
+        # ICAO MRZ by design, so this crops the bottom ~30% of the page looking
+        # for one anyway. A real e-Aadhaar PDF/screenshot has a dense English
+        # disclaimer paragraph in exactly that band -- observed live to garble
+        # into text that still passes the "looks MRZ-shaped" heuristic (long
+        # enough, contains '<'), which the MRZ parser then "validates" as a
+        # forged passport MRZ with every checksum failing. Running this pass on
+        # a document that structurally can't have an MRZ only manufactures false
+        # positives.
+        if hasattr(ocr_svc, "extract_mrz_lines") and ocr_result.get("fields", {}).get("document_type") not in TesseractOCRService.NON_MRZ_DOCUMENT_TYPES:
+            ocr_result["mrz_lines"] = ocr_svc.extract_mrz_lines(doc_tmp_path)
+        else:
+            ocr_result["mrz_lines"] = []
 
     elapsed_ms = (time.time() - t0) * 1000.0
     analysis.ocr_result = ocr_result
@@ -255,7 +263,15 @@ def process_tamper_analysis(case_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Document analysis record not found.")
 
     tamper_svc = get_tamper_service()
-    tamper_result = tamper_svc.analyze(analysis.document_image_path, case_id)
+    with decrypted_tempfile(analysis.document_image_path) as doc_tmp_path:
+        tamper_result = tamper_svc.analyze(doc_tmp_path, case_id)
+
+    # tamper_svc.analyze() writes its ELA heatmap directly to this path as
+    # plaintext (it has no idea encryption exists) -- encrypt it in place
+    # immediately, the same treatment as the source document above.
+    heatmap_path = os.path.join(settings.UPLOAD_DIR, "heatmaps", f"{case_id}_tamper_heatmap.jpg")
+    if os.path.exists(heatmap_path):
+        encrypt_file_in_place(heatmap_path)
 
     elapsed_ms = (time.time() - t0) * 1000.0
     analysis.tamper_result = tamper_result
@@ -301,8 +317,7 @@ async def process_face_verification(
         validate_image_upload(file.filename, len(contents))
         fname = sanitize_filename(file.filename)
         live_face_path = os.path.join(settings.UPLOAD_DIR, "faces", fname)
-        with open(live_face_path, "wb") as f:
-            f.write(contents)
+        write_encrypted_file(live_face_path, contents)
     else:
         # No custom live image uploaded: auto-simulate a capture. Without a
         # real embedded face here, MTCNN can't detect a face in the
@@ -315,11 +330,28 @@ async def process_face_verification(
         live_face_path = os.path.join(settings.UPLOAD_DIR, "faces", f"{case_id}_live.jpg")
         from app.utils.synthetic_generator import SyntheticDocumentGenerator
         SyntheticDocumentGenerator.generate_live_face_image(live_face_path, face_photo_path=PERSON_A)
+        # The generator (unaware encryption exists) just wrote a plaintext
+        # file straight to its final resting place -- convert it in place.
+        encrypt_file_in_place(live_face_path)
 
     analysis.face_image_path = live_face_path
 
     face_svc = get_face_service()
-    face_result = face_svc.verify(analysis.document_image_path, live_face_path, case_id)
+    with decrypted_tempfile(analysis.document_image_path) as doc_tmp_path, \
+         decrypted_tempfile(live_face_path) as live_tmp_path:
+        face_result = face_svc.verify(doc_tmp_path, live_tmp_path, case_id)
+
+    # face_svc.verify() writes whichever face crops it managed to extract
+    # directly to these paths as plaintext -- encrypt in place whatever it
+    # actually produced (not every code path inside it creates both, e.g.
+    # NO_FACE_DETECTED/MULTIPLE_FACES branches).
+    crops_dir = os.path.join(settings.UPLOAD_DIR, "crops")
+    for crop_path in [
+        os.path.join(crops_dir, f"{case_id}_doc_face.jpg"),
+        os.path.join(crops_dir, f"{case_id}_live_face.jpg"),
+    ]:
+        if os.path.exists(crop_path):
+            encrypt_file_in_place(crop_path)
 
     elapsed_ms = (time.time() - t0) * 1000.0
     analysis.face_result = face_result

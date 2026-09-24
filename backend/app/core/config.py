@@ -79,6 +79,19 @@ class Settings(BaseSettings):
     # rather than silently failing on first use.
     ANCHOR_PRIVATE_KEY: str = ""
 
+    # Symmetric key (Fernet/AES-128-CBC+HMAC) encrypting every biometric
+    # artifact at rest -- document scans, live face captures, extracted
+    # face crops, tamper heatmaps, and cross-case face embeddings (see
+    # app.core.encryption). This is a real key from an environment
+    # variable, not a hardcoded literal, but it is NOT production-grade key
+    # management: one static key, no rotation, no envelope
+    # encryption/per-record data keys, no HSM/KMS -- generated once via
+    # `Fernet.generate_key()` the same way ANCHOR_PRIVATE_KEY/SECRET_KEY
+    # already are for this demo. Override via env var in any real
+    # deployment; this default exists purely so the app works out of the
+    # box.
+    BIOMETRIC_ENCRYPTION_KEY: str = "GIdlRJ4jkqQin6vgx8uDRtGQ2EXnGhbd_jIXGEjS848="
+
     # Privacy & Disclaimer
     DISCLAIMER_TEXT: str = (
         "PROTOTYPE SYSTEM — Smart India Hackathon 2026 Demo. "

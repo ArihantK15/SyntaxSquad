@@ -98,8 +98,13 @@ export const RiskScore: React.FC<RiskScoreProps> = ({
 
           {/* Centered Score */}
           <div className="absolute flex flex-col items-center justify-center text-center">
+            {/* One decimal place, not a rounded integer -- an isolated
+                CRITICAL signal floors the true score to just above the
+                Medium/High boundary (e.g. 49.1), which a rounded "49"
+                visually contradicts System Settings' own stated 25-49
+                Medium band. */}
             <span className={`text-3xl font-bold tracking-tight ${theme.textColor}`}>
-              {Math.round(score)}
+              {score.toFixed(1)}
             </span>
             <span className="text-[10px] uppercase text-graphite-400 tracking-wider">
               / 100

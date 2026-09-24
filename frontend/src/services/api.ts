@@ -12,6 +12,32 @@ import {
 
 const API_BASE = '/api';
 
+// The New Screening pipeline's steps used to call plain fetch() with no
+// timeout -- a request that never resolves (backend wedged on a malformed
+// upload, network stall, etc.) left the UI stuck on "running" forever with
+// no way out but reloading the tab. Each screening-pipeline call below is
+// bounded so a stuck request surfaces as a clear, catchable error instead.
+const SCREENING_STEP_TIMEOUT_MS = 20000;
+
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit = {},
+  timeoutMs: number = SCREENING_STEP_TIMEOUT_MS
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (err: any) {
+    if (err.name === 'AbortError') {
+      throw new Error(`Request timed out after ${Math.round(timeoutMs / 1000)}s -- the server may be unavailable or unable to process this file.`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // Officer-gated actions (case deletion, biometric purge, policy updates,
 // blockchain anchoring -- see backend/app/api/deps.py's require_officer_auth)
 // require an X-API-Key header. This USED TO be a literal key value baked
@@ -205,7 +231,7 @@ export const api = {
     formData.append('document_type', documentType);
     formData.append('country', country);
 
-    const res = await fetch(`${API_BASE}/screening/upload`, {
+    const res = await fetchWithTimeout(`${API_BASE}/screening/upload`, {
       method: 'POST',
       body: formData
     });
@@ -217,19 +243,19 @@ export const api = {
   },
 
   async runStepOCR(caseId: string) {
-    const res = await fetch(`${API_BASE}/screening/${caseId}/ocr`, { method: 'POST' });
+    const res = await fetchWithTimeout(`${API_BASE}/screening/${caseId}/ocr`, { method: 'POST' });
     if (!res.ok) throw new Error('OCR extraction failed');
     return res.json();
   },
 
   async runStepValidate(caseId: string) {
-    const res = await fetch(`${API_BASE}/screening/${caseId}/validate`, { method: 'POST' });
+    const res = await fetchWithTimeout(`${API_BASE}/screening/${caseId}/validate`, { method: 'POST' });
     if (!res.ok) throw new Error('MRZ and rules validation failed');
     return res.json();
   },
 
   async runStepTamper(caseId: string) {
-    const res = await fetch(`${API_BASE}/screening/${caseId}/tamper`, { method: 'POST' });
+    const res = await fetchWithTimeout(`${API_BASE}/screening/${caseId}/tamper`, { method: 'POST' });
     if (!res.ok) throw new Error('Tamper forensics failed');
     return res.json();
   },
@@ -239,7 +265,7 @@ export const api = {
     if (liveFaceFile) {
       formData.append('file', liveFaceFile);
     }
-    const res = await fetch(`${API_BASE}/screening/${caseId}/face`, {
+    const res = await fetchWithTimeout(`${API_BASE}/screening/${caseId}/face`, {
       method: 'POST',
       body: liveFaceFile ? formData : undefined
     });
@@ -248,7 +274,7 @@ export const api = {
   },
 
   async runStepRisk(caseId: string) {
-    const res = await fetch(`${API_BASE}/screening/${caseId}/risk`, { method: 'POST' });
+    const res = await fetchWithTimeout(`${API_BASE}/screening/${caseId}/risk`, { method: 'POST' });
     if (!res.ok) throw new Error('Risk score aggregation failed');
     return res.json();
   },
@@ -271,7 +297,7 @@ export const api = {
     doc_number?: string;
     country_name?: string;
   }) {
-    const res = await fetch(`${API_BASE}/demo/generate-doc`, {
+    const res = await fetchWithTimeout(`${API_BASE}/demo/generate-doc`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params)

@@ -46,3 +46,4 @@ demo_output/
 
 # Git worktrees
 .worktrees/
+.aletheore/

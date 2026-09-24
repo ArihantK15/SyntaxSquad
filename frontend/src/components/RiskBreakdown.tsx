@@ -17,34 +17,48 @@ export const RiskBreakdown: React.FC<RiskBreakdownProps> = ({ breakdown, totalSc
         icon={<Sliders className="w-4 h-4 text-graphite-500" />}
         action={
           <span className="text-xs text-graphite-400">
-            Total: <strong className="text-graphite-100">{Math.round(totalScore)} / 100</strong>
+            {/* One decimal place -- an integer-rounded score here can look like
+                it contradicts System Settings' plain risk-tier boundaries when
+                the critical-signal floor lands just above one (e.g. "49" reads
+                as still-Medium against a stated 25-49 Medium band, when the
+                real, floored value is 49.1 and genuinely HIGH). */}
+            Total: <strong className="text-graphite-100">{totalScore.toFixed(1)} / 100</strong>
           </span>
         }
       />
 
       <div className="space-y-3">
         {breakdown.map((item, idx) => {
-          const percentOfTotal = Math.round(item.weighted_contribution);
+          const hasWeight = item.weight !== null && item.raw_risk !== null;
           return (
             <div key={idx} className="space-y-1.5">
               <div className="flex items-center justify-between text-xs">
                 <span className="text-graphite-300 flex items-center gap-2">
-                  <span className="text-graphite-200 font-bold">+{item.weighted_contribution.toFixed(1)}</span>
+                  <span className="text-graphite-200 font-bold">
+                    {item.weighted_contribution >= 0 ? '+' : ''}{item.weighted_contribution.toFixed(1)}
+                  </span>
                   <span>{item.factor}</span>
-                  <span className="text-[10px] text-graphite-400">({Math.round(item.weight * 100)}% Weight)</span>
+                  {hasWeight && (
+                    <span className="text-[10px] text-graphite-400">({Math.round((item.weight as number) * 100)}% Weight)</span>
+                  )}
                 </span>
-                <span className="text-graphite-400 text-[11px]">
-                  Raw Risk: {Math.round(item.raw_risk)}%
-                </span>
+                {hasWeight && (
+                  <span className="text-graphite-400 text-[11px]">
+                    Raw Risk: {Math.round(item.raw_risk as number)}%
+                  </span>
+                )}
               </div>
 
-              {/* Progress bar */}
-              <div className="w-full bg-graphite-950 h-2 rounded-full overflow-hidden border border-graphite-800/80">
-                <div
-                  className="h-full bg-graphite-500 rounded-full transition-all duration-700"
-                  style={{ width: `${Math.min(100, Math.max(0, item.raw_risk))}%` }}
-                ></div>
-              </div>
+              {/* Progress bar -- only meaningful for a proportional weighted
+                  category; the flat floor-adjustment row has none. */}
+              {hasWeight && (
+                <div className="w-full bg-graphite-950 h-2 rounded-full overflow-hidden border border-graphite-800/80">
+                  <div
+                    className="h-full bg-graphite-500 rounded-full transition-all duration-700"
+                    style={{ width: `${Math.min(100, Math.max(0, item.raw_risk as number))}%` }}
+                  ></div>
+                </div>
+              )}
 
               {item.top_signals && item.top_signals.length > 0 && (
                 <div className="flex flex-wrap gap-1 mt-1">

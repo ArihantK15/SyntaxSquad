@@ -1,11 +1,13 @@
+import mimetypes
 import os
 import sys
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings
 from app.core.database import Base, engine, SessionLocal
+from app.core.encryption import decrypt_bytes
 from app.api.routes import health, screening, cases, dashboard, demo, audit, settings as settings_routes
 
 from contextlib import asynccontextmanager
@@ -61,10 +63,32 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount static uploads directory for document images, heatmaps, and face crops
+# Every file under UPLOAD_DIR (document scans, live face captures, face
+# crops, tamper heatmaps) is encrypted at rest -- see app.core.encryption --
+# so this can no longer be a raw StaticFiles mount serving bytes straight
+# off disk. This route decrypts in memory and streams the plaintext back,
+# at the exact same URL shape (`/uploads/<subdir>/<filename>`) the old
+# mount used, so no frontend code needed to change.
 uploads_path = os.path.abspath(settings.UPLOAD_DIR)
 os.makedirs(uploads_path, exist_ok=True)
-app.mount("/uploads", StaticFiles(directory=uploads_path), name="uploads")
+
+
+@app.get("/uploads/{file_path:path}")
+def serve_encrypted_upload(file_path: str):
+    requested_path = os.path.normpath(os.path.join(uploads_path, file_path))
+    # Path-traversal guard StaticFiles handled for free -- a "../" segment
+    # must never resolve outside uploads_path.
+    if os.path.commonpath([requested_path, uploads_path]) != uploads_path:
+        raise HTTPException(status_code=404, detail="Not found.")
+    if not os.path.isfile(requested_path):
+        raise HTTPException(status_code=404, detail="Not found.")
+
+    with open(requested_path, "rb") as f:
+        ciphertext = f.read()
+    plaintext = decrypt_bytes(ciphertext)
+
+    media_type, _ = mimetypes.guess_type(requested_path)
+    return Response(content=plaintext, media_type=media_type or "application/octet-stream")
 
 # Standalone public case-verification page (plain HTML/JS, no React/build step,
 # no login) -- backed by the no-auth GET /api/audit/anchor-proof/{case_number}

@@ -491,6 +491,57 @@ def test_dl_fields_extract_name_dob_issue_and_expiry():
     assert fields["nationality"] == "INDIA"
 
 
+def test_dl_expiry_survives_tesseract_misreading_valid_as_vaud():
+    """
+    Reproduces a real failure found by running an actual photographed
+    (expired) Driving Licence through the live pipeline: Tesseract read the
+    genuine printed "VALID TILL" label as "VAUD TILL" -- VALID -> VAUD is a
+    2-edit slip (L misread as U, the I dropped) that the exact \bVALID
+    TILL\b match in parse_dl_fields never catches. date_of_expiry came back
+    None, so rules_engine.py's expiration check (the entire point of this
+    scenario -- a DL has no MRZ, so this printed field is its only expiry
+    signal) silently never fired at all, and a genuinely expired licence
+    screened as LOW risk / clear for entry.
+    """
+    raw_text = (
+        "TRANSPORT DEPARTMENT\n"
+        "DL NO\n"
+        "KA0320110098765\n"
+        "NAME\n"
+        "KIRAN REDDY\n"
+        "DATE OF BIRTH\n"
+        "10/02/1988\n"
+        "VAUD FROM\n"
+        "20/03/2011\n"
+        "VAUD TILL\n"
+        "01/01/2020\n"
+    )
+    lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
+    fields = svc.parse_dl_fields(raw_text, lines)
+    assert fields["date_of_issue"] == "20/03/2011"
+    assert fields["date_of_expiry"] == "01/01/2020"
+
+
+def test_dl_fuzzy_label_match_does_not_fire_on_unrelated_lines():
+    """
+    Guards against the fuzzy fallback being too permissive: a line that
+    merely contains short, common words must not be mistaken for a
+    misread "VALID TILL"/"VALID FROM" label just because both are absent
+    from the document entirely.
+    """
+    raw_text = (
+        "TRANSPORT DEPARTMENT\n"
+        "NAME\n"
+        "KIRAN REDDY\n"
+        "REMARKS\n"
+        "NIL\n"
+    )
+    lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
+    fields = svc.parse_dl_fields(raw_text, lines)
+    assert fields["date_of_issue"] is None
+    assert fields["date_of_expiry"] is None
+
+
 def test_extract_text_routes_to_dl_parser_and_tags_document_type(monkeypatch):
     dl_raw = (
         "TRANSPORT DEPARTMENT\n"

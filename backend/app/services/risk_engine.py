@@ -288,6 +288,7 @@ class RiskEngine:
         # Total Aggregated Score (0 to 100)
         total_risk = round(mrz_contrib + tamper_contrib + face_contrib + consistency_contrib + watchlist_contrib, 1)
         total_risk = max(0.0, min(100.0, total_risk))
+        pre_floor_total = total_risk
 
         # Deterministic hard-stop override: a CRITICAL-severity signal (e.g. an
         # expired document, a watchlist hit) is a definitive rule violation, not
@@ -351,6 +352,25 @@ class RiskEngine:
                 "top_signals": watchlist_signals_list
             }
         ]
+
+        # Makes the hard-stop override (above) visible as its own line, not
+        # just an invisible jump between the weighted categories' sum and the
+        # displayed total -- previously a CRITICAL signal with no weighted
+        # factor of its own (duplicate-identity match) could supply most of
+        # the score while the breakdown categories summed to far less than
+        # the total, in a panel literally named "Explainable risk breakdown".
+        # No weight/raw_risk of its own (see RiskFactorBreakdown's schema
+        # comment): this is a flat point adjustment, not a proportional
+        # category.
+        if critical_floor_applied:
+            critical_signal_names = [s["signal"] for s in all_signals if s.get("severity") == "CRITICAL"]
+            breakdown.append({
+                "factor": "Critical Signal Floor",
+                "weight": None,
+                "raw_risk": None,
+                "weighted_contribution": round(total_risk - pre_floor_total, 1),
+                "top_signals": critical_signal_names[:2]
+            })
 
         return {
             "risk_score": total_risk,

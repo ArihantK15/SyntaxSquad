@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { api } from '../services/api';
 import { ProcessingPipeline, PipelineStage } from '../components/ProcessingPipeline';
 import { SectionHeading } from '../components/SectionHeading';
+import { validateImageFile } from '../utils/fileValidation';
 import {
   UploadCloud,
   FileText,
@@ -36,8 +37,11 @@ const INITIAL_STAGES: PipelineStage[] = [
 export const ScreeningPage: React.FC<ScreeningPageProps> = ({ onScreeningComplete }) => {
   const [docFile, setDocFile] = useState<File | null>(null);
   const [docPreview, setDocPreview] = useState<string | null>(null);
+  const [docError, setDocError] = useState<string | null>(null);
   const [liveFaceFile, setLiveFaceFile] = useState<File | null>(null);
   const [liveFacePreview, setLiveFacePreview] = useState<string | null>(null);
+  const [faceError, setFaceError] = useState<string | null>(null);
+  const [pipelineError, setPipelineError] = useState<string | null>(null);
 
   const [documentType, setDocumentType] = useState('Passport');
   const [country, setCountry] = useState('REPUBLIC OF UTOPIA');
@@ -59,32 +63,48 @@ export const ScreeningPage: React.FC<ScreeningPageProps> = ({ onScreeningComplet
   const fileInputRef = useRef<HTMLInputElement>(null);
   const faceInputRef = useRef<HTMLInputElement>(null);
 
-  const setDoc = (file: File) => {
+  // Validates the file's actual content (magic bytes), not just its
+  // extension or declared MIME type, before it ever reaches the pipeline --
+  // see utils/fileValidation.ts for why that distinction matters here.
+  const trySetDocFile = async (file: File) => {
+    const result = await validateImageFile(file);
+    if (!result.valid) {
+      setDocError(result.reason || 'That file could not be used as a document image.');
+      return;
+    }
+    setDocError(null);
     setDocFile(file);
     setDocPreview(URL.createObjectURL(file));
   };
 
-  const handleDocChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      setDoc(e.target.files[0]);
+  const trySetFaceFile = async (file: File) => {
+    const result = await validateImageFile(file);
+    if (!result.valid) {
+      setFaceError(result.reason || 'That file could not be used as a face photo.');
+      return;
     }
+    setFaceError(null);
+    setLiveFaceFile(file);
+    setLiveFacePreview(URL.createObjectURL(file));
+  };
+
+  const handleDocChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-selecting the same (or a corrected) file
+    if (file) trySetDocFile(file);
   };
 
   const handleDocDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     setIsDraggingDoc(false);
     const file = e.dataTransfer.files?.[0];
-    if (file && file.type.startsWith('image/')) {
-      setDoc(file);
-    }
+    if (file) trySetDocFile(file);
   };
 
   const handleFaceChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      setLiveFaceFile(file);
-      setLiveFacePreview(URL.createObjectURL(file));
-    }
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (file) trySetFaceFile(file);
   };
 
   // Webcam Controls
@@ -157,8 +177,9 @@ export const ScreeningPage: React.FC<ScreeningPageProps> = ({ onScreeningComplet
 
       setDocFile(file);
       setDocPreview(res.url);
+      setDocError(null);
     } catch (err: any) {
-      alert(`Specimen generator error: ${err.message}`);
+      setPipelineError(`Specimen generator error: ${err.message}`);
     } finally {
       setGeneratingSpecimen(false);
     }
@@ -167,15 +188,22 @@ export const ScreeningPage: React.FC<ScreeningPageProps> = ({ onScreeningComplet
   // Run full staged screening pipeline
   const handleStartScreening = async () => {
     if (!docFile) {
-      alert('Please upload or generate a document first.');
+      setDocError('Please upload or generate a document first.');
       return;
     }
 
+    // Tracks which stage was in-flight so a failure can mark that exact
+    // node red instead of leaving it spinning forever -- see
+    // ProcessingPipeline's 'error' status.
+    let currentStage = 0;
+
     try {
+      setPipelineError(null);
       setIsProcessing(true);
       setStages(INITIAL_STAGES.map((s) => ({ ...s, status: 'pending', latencyMs: undefined })));
 
       // Step 1: Upload
+      currentStage = 0;
       updateStage(0, 'running');
       const t0 = performance.now();
       const uploadRes = await api.uploadScreeningDocument(docFile, documentType, country);
@@ -183,12 +211,14 @@ export const ScreeningPage: React.FC<ScreeningPageProps> = ({ onScreeningComplet
       updateStage(0, 'completed', performance.now() - t0, `Case #${uploadRes.case_number} registered`);
 
       // Step 2: OCR
+      currentStage = 1;
       updateStage(1, 'running');
       const t1 = performance.now();
       const ocrRes = await api.runStepOCR(caseId);
       updateStage(1, 'completed', performance.now() - t1, `Extracted ${ocrRes.ocr_result.detected_lines?.length || 0} text lines`);
 
       // Step 3: MRZ & Rules
+      currentStage = 2;
       updateStage(2, 'running');
       const t2 = performance.now();
       const valRes = await api.runStepValidate(caseId);
@@ -196,6 +226,7 @@ export const ScreeningPage: React.FC<ScreeningPageProps> = ({ onScreeningComplet
       updateStage(2, 'completed', performance.now() - t2, mrzValid ? 'Checksums verified' : 'Checksum discrepancy');
 
       // Step 4: Tamper AI
+      currentStage = 3;
       updateStage(3, 'running');
       const t3 = performance.now();
       const tamperRes = await api.runStepTamper(caseId);
@@ -203,18 +234,21 @@ export const ScreeningPage: React.FC<ScreeningPageProps> = ({ onScreeningComplet
       updateStage(3, 'completed', performance.now() - t3, `${risk} tamper risk`);
 
       // Step 5: Face Verification
+      currentStage = 4;
       updateStage(4, 'running');
       const t4 = performance.now();
       const faceRes = await api.runStepFace(caseId, liveFaceFile || undefined);
       updateStage(4, 'completed', performance.now() - t4, `${Math.round(faceRes.face_result.similarity * 100)}% match (${faceRes.face_result.status})`);
 
       // Step 6: Risk Aggregation
+      currentStage = 5;
       updateStage(5, 'running');
       const t5 = performance.now();
       const riskRes = await api.runStepRisk(caseId);
       updateStage(5, 'completed', performance.now() - t5, `${Math.round(riskRes.risk_score)}/100 (${riskRes.risk_level})`);
 
       // Step 7: Finalize & Navigate
+      currentStage = 6;
       updateStage(6, 'running');
       await new Promise((r) => setTimeout(r, 600));
       updateStage(6, 'completed', 100, 'Ready for officer inspection');
@@ -224,7 +258,8 @@ export const ScreeningPage: React.FC<ScreeningPageProps> = ({ onScreeningComplet
         onScreeningComplete(caseId);
       }, 900);
     } catch (err: any) {
-      alert(`Screening pipeline error: ${err.message}`);
+      updateStage(currentStage, 'error', undefined, err.message || 'Failed');
+      setPipelineError(err.message || 'The screening pipeline failed unexpectedly.');
       setIsProcessing(false);
     }
   };
@@ -297,6 +332,7 @@ export const ScreeningPage: React.FC<ScreeningPageProps> = ({ onScreeningComplet
             onChange={handleDocChange}
             accept="image/jpeg,image/png,image/jpg"
             className="hidden"
+            data-testid="doc-file-input"
           />
 
           <div
@@ -336,6 +372,16 @@ export const ScreeningPage: React.FC<ScreeningPageProps> = ({ onScreeningComplet
               </div>
             )}
           </div>
+
+          {docError && (
+            <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-rose-950/40 border border-rose-800/60 text-rose-300 text-xs">
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+              <span className="flex-1">{docError}</span>
+              <button type="button" onClick={() => setDocError(null)} className="shrink-0 cursor-pointer hover:text-rose-100">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
 
           {/* Document Metadata Form */}
           <div className="grid grid-cols-2 gap-3">
@@ -466,11 +512,30 @@ export const ScreeningPage: React.FC<ScreeningPageProps> = ({ onScreeningComplet
                 <p className="text-xs text-graphite-500">
                   Take a live camera picture or upload an image to test document portrait comparison.
                 </p>
+                {faceError && (
+                  <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-rose-950/40 border border-rose-800/60 text-rose-300 text-xs">
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                    <span className="flex-1">{faceError}</span>
+                    <button type="button" onClick={() => setFaceError(null)} className="shrink-0 cursor-pointer hover:text-rose-100">
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           )}
         </div>
       </div>
+
+      {pipelineError && (
+        <div className="flex items-start gap-2 px-4 py-3 rounded-xl bg-rose-950/40 border border-rose-800/60 text-rose-300 text-sm">
+          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+          <span className="flex-1">{pipelineError}</span>
+          <button type="button" onClick={() => setPipelineError(null)} className="shrink-0 cursor-pointer hover:text-rose-100">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* Action Button */}
       <button
