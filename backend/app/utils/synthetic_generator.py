@@ -596,3 +596,102 @@ class SyntheticDocumentGenerator:
             "given_names": given_names,
             "full_name": full_name,
         }
+
+    @classmethod
+    def generate_visa(
+        cls,
+        out_path: str,
+        mode: str = "genuine",
+        surname: str = "MENDEZ",
+        given_names: str = "CARLOS",
+        nationality: str = "ATLANTIAN",
+        doc_number: str = "UV1234567",
+        dob_yymmdd: str = "850314",
+        visa_type: str = "BUSINESS",
+        entry_validation: str = "MULTIPLE ENTRY",
+        issue_yymmdd: str = "260101",
+        stay_duration_yymmdd: str = "300630",
+        face_photo_path: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Creates a synthetic Visa specimen, issued by this project's own
+        fictional "Republic of Utopia" (matching the passport specimen's
+        own fictional issuer) rather than any one real country's visa
+        design -- there is no single real template to validate a generic
+        visa against the way Aadhaar/PAN/DL/EPIC each have one real
+        national issuer. "ENTRY VISA" / "BUREAU OF IMMIGRATION" boilerplate
+        drawn below is what routes OCR to the visa field parser (see
+        ocr_service.py's VISA_MARKERS) -- deliberately not a bare "VISA"
+        substring, since generate_document's own 'stamp_manipulated' mode
+        draws unrelated "VISA EXEMPTION" stamp text onto a PASSPORT
+        specimen.
+
+        'Stay Duration' is a printed validity date (the date until which
+        the holder may remain), not a duration-in-days count -- see
+        parse_visa_fields' own docstring for why. Visa Number is
+        extract-only: no checksum is fabricated for it.
+
+        Modes: 'genuine' (stay_duration_yymmdd as given) or 'expired'
+        (the printed Stay Duration is overridden to a fixed past date,
+        mirroring generate_driving_license's own 'expired' mode).
+        """
+        w, h = cls.WIDTH, cls.HEIGHT
+        img = Image.new("RGB", (w, h), color=(248, 250, 252))
+        draw = ImageDraw.Draw(img)
+
+        for y in range(0, h, 12):
+            color = (230, 238, 248) if (y // 12) % 2 == 0 else (238, 244, 252)
+            draw.line([(0, y), (w, y)], fill=color, width=1)
+        for x in range(0, w, 24):
+            draw.line([(x, 0), (x, h)], fill=(240, 246, 254), width=1)
+
+        # Header banner
+        draw.rectangle([0, 0, w, 70], fill=(15, 23, 42))
+        draw.rectangle([0, 70, w, 74], fill=(59, 130, 246))
+        draw.text((25, 16), "ENTRY VISA", fill=(255, 255, 255))
+        draw.text((25, 42), "BUREAU OF IMMIGRATION • REPUBLIC OF UTOPIA • FICTIONAL TEST SPECIMEN", fill=(148, 163, 184))
+        draw.text((w - 220, 25), "TRAVEL VISA", fill=(203, 213, 225))
+
+        # Photo
+        if face_photo_path:
+            cls._paste_photo(img, face_photo_path, 40, 100, 240, 320)
+            draw.rectangle([40, 100, 40 + 240, 100 + 320], outline=(150, 160, 180), width=2)
+        else:
+            cls._draw_avatar(draw, 40, 100, 240, 320, variant=1)
+
+        full_name = f"{given_names} {surname}".upper()
+        stay_display = "01/01/2020" if mode == "expired" else cls._format_yymmdd_display(stay_duration_yymmdd)
+        fields = [
+            ("VISA NUMBER", doc_number),
+            ("FULL NAME", full_name),
+            ("NATIONALITY", nationality.upper()),
+            ("DATE OF BIRTH", cls._format_yymmdd_display(dob_yymmdd)),
+            ("VISA TYPE", visa_type.upper()),
+            ("ENTRY VALIDATION", entry_validation.upper()),
+            ("DATE OF ISSUE", cls._format_yymmdd_display(issue_yymmdd)),
+            ("STAY DURATION", stay_display),
+        ]
+
+        label_font = cls._load_font(12)
+        value_font = cls._load_font(18)
+        left_text = 320
+        cur_y = 95
+        for label, val in fields:
+            draw.text((left_text, cur_y), label, fill=(100, 116, 139), font=label_font)
+            draw.text((left_text, cur_y + 18), str(val), fill=(15, 23, 42), font=value_font)
+            cur_y += 48
+
+        # Security emblem stamp watermark, matching the passport specimen's own
+        draw.ellipse([w - 180, 250, w - 40, 390], outline=(219, 234, 254), width=4)
+        draw.text((w - 165, 310), "SIMULATED\nSPECIMEN", fill=(191, 219, 254))
+
+        img.save(out_path, "JPEG", quality=95)
+
+        return {
+            "image_path": out_path,
+            "mode": mode,
+            "doc_number": doc_number,
+            "surname": surname,
+            "given_names": given_names,
+            "full_name": full_name,
+        }

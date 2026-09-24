@@ -298,6 +298,20 @@ class TesseractOCRService(BaseOCRService):
         "ELECTION COMMISSION OF INDIA", "ELECTORS PHOTO IDENTITY CARD", "EPIC NO"
     )
 
+    # Visa specimens are issued by this project's own fictional "Republic of
+    # Utopia" (matching the passport specimen's own fictional issuer),
+    # rather than modeled on any one real country's visa design -- there is
+    # no single real template a visa could be validated against the way
+    # Aadhaar/PAN/DL/EPIC each have one real national issuer and spec.
+    # Deliberately NOT a bare "VISA" substring: generate_document's own
+    # 'stamp_manipulated'/'multiple_anomalies' tamper modes draw a simulated
+    # pasted stamp reading "VISA EXEMPTION [SIMULATED PATCH]" directly onto
+    # a PASSPORT specimen, which a bare "VISA" marker would misroute to the
+    # visa field parser instead of the passport one.
+    VISA_MARKERS = (
+        "ENTRY VISA", "BUREAU OF IMMIGRATION"
+    )
+
     @classmethod
     def _detect_document_type(cls, raw_text: str) -> str:
         """
@@ -320,13 +334,17 @@ class TesseractOCRService(BaseOCRService):
             return "DRIVING_LICENSE"
         if any(marker in upper for marker in cls.VOTER_ID_MARKERS):
             return "VOTER_ID"
+        if any(marker in upper for marker in cls.VISA_MARKERS):
+            return "VISA"
         return "PASSPORT"
 
     # Document types with no ICAO 9303 Machine Readable Zone by design --
     # shared with screening.py (which skips the MRZ-band OCR pass for these)
     # and rules_engine.py (which treats a missing MRZ as expected, not a
-    # HIGH-severity "Missing Machine Readable Zone" signal, for these).
-    NON_MRZ_DOCUMENT_TYPES = ("AADHAAR", "PAN", "DRIVING_LICENSE", "VOTER_ID")
+    # HIGH-severity "Missing Machine Readable Zone" signal, for these). A
+    # visa is extract-only here (no MRZ format is modeled for it), same as
+    # the other three.
+    NON_MRZ_DOCUMENT_TYPES = ("AADHAAR", "PAN", "DRIVING_LICENSE", "VOTER_ID", "VISA")
 
     @staticmethod
     def _extract_aadhaar_number(raw_text: str) -> Optional[str]:
@@ -598,6 +616,68 @@ class TesseractOCRService(BaseOCRService):
 
         return fields
 
+    def parse_visa_fields(self, raw_text: str, lines: List[str]) -> Dict[str, Any]:
+        """
+        Extracts structured fields from a Visa specimen. Like Aadhaar/PAN/
+        DL/Voter ID, this is a plain label-above-value layout, so the
+        existing _value_after_label helper covers every field directly --
+        no dedicated regex extractor for the visa number is needed (unlike
+        PAN/DL/EPIC, there is no publicly documented visa-numbering
+        structure to check the shape of, or to fall back on when a label
+        line is OCR-garbled).
+
+        Visa Number is extract-only: no checksum or structural format is
+        invented for it, the same honest posture as Aadhaar's document
+        number (Aadhaar has no format-validation rule in rules_engine.py
+        either).
+
+        'Stay Duration' is modeled as a printed validity date (the date
+        until which the holder may remain), not a duration-in-days count --
+        this is what lets DocumentRulesEngine's new VISA_STAY_DURATION_
+        VALIDATION rule reuse RULE 2's own date-plausibility pattern
+        directly, the same way a DL's 'Valid Till' does for
+        DOCUMENT_EXPIRATION. It is intentionally a separate field from
+        date_of_expiry (left None here) rather than reusing that key: a
+        real visa's own validity window (when it can be used to enter) and
+        the permitted duration of a given stay are genuinely distinct
+        concepts, and populating date_of_expiry here would silently double
+        up with RULE 2's own generic expiry check instead of exercising the
+        dedicated visa rule.
+        """
+        fields: Dict[str, Any] = {
+            "full_name": None,
+            "document_number": None,
+            "nationality": None,
+            "country": "REPUBLIC OF UTOPIA",
+            "date_of_birth": None,
+            "date_of_issue": None,
+            "date_of_expiry": None,
+            "sex": None,
+            "visa_type": None,
+            "entry_validation": None,
+            "stay_duration_until": None
+        }
+
+        # Reproduces a real failure found by rendering an actual specimen
+        # through real Tesseract: the small label-font "R" in "VISA NUMBER"
+        # was misread as "VISA NUMBEF" (an exact-match label search returns
+        # None entirely on this single-character slip) -- the same class of
+        # failure DL's "VALID TILL"/"VAUD TILL" fix addressed, and the same
+        # fuzzy-label fallback fixes it here.
+        fields["document_number"] = (
+            self._value_after_label(lines, r'\bVISA NUMBER\b')
+            or self._value_after_fuzzy_label(lines, ["VISA", "NUMBER"])
+        )
+        fields["full_name"] = self._value_after_label(lines, r'\bFULL NAME\b')
+        fields["nationality"] = self._value_after_label(lines, r'\bNATIONALITY\b')
+        fields["date_of_birth"] = self._extract_date(self._value_after_label(lines, r'\bDATE OF BIRTH\b'))
+        fields["visa_type"] = self._value_after_label(lines, r'\bVISA TYPE\b')
+        fields["entry_validation"] = self._value_after_label(lines, r'\bENTRY VALIDATION\b')
+        fields["date_of_issue"] = self._extract_date(self._value_after_label(lines, r'\bDATE OF ISSUE\b'))
+        fields["stay_duration_until"] = self._extract_date(self._value_after_label(lines, r'\bSTAY DURATION\b'))
+
+        return fields
+
     def parse_fields_from_text(self, raw_text: str, lines: List[str]) -> Dict[str, Any]:
         """Extracts structured document fields, anchored on each field's own label line."""
         fields: Dict[str, Any] = {
@@ -685,6 +765,8 @@ class TesseractOCRService(BaseOCRService):
                 fields = self.parse_dl_fields(raw_text, lines)
             elif document_type == "VOTER_ID":
                 fields = self.parse_voter_id_fields(raw_text, lines)
+            elif document_type == "VISA":
+                fields = self.parse_visa_fields(raw_text, lines)
             else:
                 fields = self.parse_fields_from_text(raw_text, lines)
             fields["document_type"] = document_type

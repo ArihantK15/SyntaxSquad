@@ -255,38 +255,60 @@ class RiskEngine:
             watchlist_signals_list.append(signal_entry["signal"])
         watchlist_contrib = round(watchlist_raw_risk * self.w_watchlist, 1)
 
-        # --- 6. Cross-Case Duplicate Identity Check (CRITICAL flag only, no weight) ---
+        # --- 6. Cross-Case Duplicate Identity Check (HIGH signal, flat unweighted add) ---
         #
         # A gallery hit (see identity_gallery_service.py) means this
-        # screening's live face closely matches a PREVIOUS case filed under
-        # a different name/document -- a real, named identity-fraud signal,
-        # not a probabilistic risk. Modeled purely as a CRITICAL-severity
-        # signal that rides the SAME hard-stop floor an expired document or
-        # watchlist hit already uses, deliberately without its own weighted
-        # factor: adding one would need a new PolicySettings column, and
-        # this app has no migration tooling (Base.metadata.create_all only
-        # creates missing tables, it won't alter an existing populated
-        # one). The floor mechanism alone is sufficient to guarantee at
-        # least HIGH regardless of how clean every other factor is.
+        # screening's live face is the CLOSEST match (at or above
+        # GALLERY_MATCH_THRESHOLD) among every OTHER case's stored live
+        # embedding -- a real corroborating identity signal, but NOT the
+        # near-certain rule violation CRITICAL severity implies here (an
+        # expired document, a watchlist hit). scripts/evaluate_gallery_scale_far.py
+        # measured the REAL 1:N behavior at gallery scale (1,200 distinct
+        # identities, not the 500 1:1 pairs the threshold was originally
+        # picked from): at GALLERY_MATCH_THRESHOLD=0.80, empirical 1:N
+        # false-accept rate was 26.0% -- roughly 1 in 4 genuinely innocent
+        # travelers, at this gallery size, would score a "match" against
+        # SOME other unrelated person purely from gallery-size compounding.
+        # No threshold tested got false-accepts low without also gutting
+        # recall on genuine duplicates (0.90 -> 0.2% FAR but only 43% of
+        # genuine duplicates caught). A signal with a 1-in-4 false-positive
+        # rate at usable recall does not belong in the automatic
+        # CRITICAL-floors-to-HIGH tier -- so, unlike before, this no longer
+        # participates in that floor at all (severity HIGH, not CRITICAL).
+        # It still needs REAL weight to matter (previously it had none:
+        # "CRITICAL flag only, no weight" relied entirely on the floor for
+        # its whole effect, which would make it silently inert now) -- added
+        # as a flat, unweighted addition to the total rather than a new
+        # weighted factor, for the same "no PolicySettings migration
+        # tooling" reason as before.
         if duplicate_identity_match:
             matched_case_number = duplicate_identity_match["case_number"]
             similarity = duplicate_identity_match.get("similarity", 0.0)
+            duplicate_identity_score_impact = 30.0
             all_signals.append({
                 "module": "IDENTITY",
                 "signal": f"Possible Duplicate Identity: matches Case {matched_case_number}",
-                "severity": "CRITICAL",
+                "severity": "HIGH",
                 "confidence": round(similarity, 2),
                 "explanation": (
-                    f"This individual's live facial biometric closely matches a PREVIOUS "
-                    f"screening (Case {matched_case_number}), filed under a different name "
-                    f"or document number. Similarity: {round(similarity * 100, 1)}%. "
-                    f"Requires officer identity review."
+                    f"This individual's live facial biometric is the closest gallery match to a "
+                    f"PREVIOUS screening (Case {matched_case_number}), filed under a different "
+                    f"name or document number. Similarity: {round(similarity * 100, 1)}%. "
+                    f"A 1:N gallery match at this threshold has a measured ~26% false-accept "
+                    f"rate at gallery scale (see scripts/evaluate_gallery_scale_far.py) -- treat "
+                    f"as a corroborating lead requiring officer identity review, not confirmed fraud."
                 ),
-                "score_impact": 30.0
+                "score_impact": duplicate_identity_score_impact
             })
+        else:
+            duplicate_identity_score_impact = 0.0
 
         # Total Aggregated Score (0 to 100)
-        total_risk = round(mrz_contrib + tamper_contrib + face_contrib + consistency_contrib + watchlist_contrib, 1)
+        total_risk = round(
+            mrz_contrib + tamper_contrib + face_contrib + consistency_contrib
+            + watchlist_contrib + duplicate_identity_score_impact,
+            1
+        )
         total_risk = max(0.0, min(100.0, total_risk))
         pre_floor_total = total_risk
 
@@ -353,6 +375,21 @@ class RiskEngine:
             }
         ]
 
+        # Same "Explainable" reconciliation requirement as the critical-floor
+        # entry below: the duplicate-identity match is a flat, unweighted
+        # addition (see the comment at its point of computation above), so it
+        # needs its own breakdown line for the same reason the floor override
+        # does -- otherwise the 5 named categories would sum to less than the
+        # displayed total with no line item accounting for the difference.
+        if duplicate_identity_match:
+            breakdown.append({
+                "factor": "Cross-Case Duplicate Identity",
+                "weight": None,
+                "raw_risk": None,
+                "weighted_contribution": duplicate_identity_score_impact,
+                "top_signals": [s["signal"] for s in all_signals if s.get("module") == "IDENTITY"][:1]
+            })
+
         # Makes the hard-stop override (above) visible as its own line, not
         # just an invisible jump between the weighted categories' sum and the
         # displayed total -- previously a CRITICAL signal with no weighted
@@ -361,7 +398,9 @@ class RiskEngine:
         # the total, in a panel literally named "Explainable risk breakdown".
         # No weight/raw_risk of its own (see RiskFactorBreakdown's schema
         # comment): this is a flat point adjustment, not a proportional
-        # category.
+        # category. Duplicate-identity no longer reaches this path (HIGH,
+        # not CRITICAL, severity -- see above), so this now only fires for
+        # an expired document, a watchlist hit, or a CRITICAL tamper verdict.
         if critical_floor_applied:
             critical_signal_names = [s["signal"] for s in all_signals if s.get("severity") == "CRITICAL"]
             breakdown.append({

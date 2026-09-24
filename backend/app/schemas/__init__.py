@@ -158,10 +158,14 @@ class FaceVerificationOut(BaseModel):
 # --- Full Risk Breakdown ---
 class RiskFactorBreakdown(BaseModel):
     factor: str
-    # None for the synthetic "Critical Signal Floor" row risk_engine.py adds
-    # when a CRITICAL-severity signal (e.g. a cross-case duplicate-identity
-    # match) forces the score up regardless of the weighted math -- that row
-    # has no proportional weight or raw-risk percentage of its own, only a
+    # None for either of the two synthetic flat-adjustment rows
+    # risk_engine.py can add alongside the 5 weighted factors: "Critical
+    # Signal Floor" (a CRITICAL-severity signal -- an expired document, a
+    # watchlist hit, a CRITICAL tamper verdict -- forces the score up
+    # regardless of the weighted math) and "Cross-Case Duplicate Identity"
+    # (a gallery match, HIGH severity, added as a flat unweighted point
+    # amount rather than a floor -- see risk_engine.py for why). Neither row
+    # has a proportional weight or raw-risk percentage of its own, only a
     # flat point adjustment (see weighted_contribution).
     weight: Optional[float] = None
     raw_risk: Optional[float] = None

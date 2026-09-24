@@ -17,7 +17,7 @@ class DocumentRulesEngine:
     # this codebase's existing style of duplicating the "AADHAAR" check
     # independently at each of its call sites rather than sharing one
     # constant across the OCR and rules-engine modules.
-    NON_MRZ_DOCUMENT_TYPES = ("AADHAAR", "PAN", "DRIVING_LICENSE", "VOTER_ID")
+    NON_MRZ_DOCUMENT_TYPES = ("AADHAAR", "PAN", "DRIVING_LICENSE", "VOTER_ID", "VISA")
 
     # CBDT's published PAN entity-type codes (the 4th of the 5 leading
     # letters). Only the well-established, commonly-cited codes are listed
@@ -469,6 +469,56 @@ class DocumentRulesEngine:
                     "confidence": 0.90,
                     "explanation": f"MRZ sex/gender code '{sex}' violates ICAO 9303 format (expected M/F/X).",
                     "score_impact": 6.0
+                })
+
+        # RULE 8: Visa Stay Duration Validity
+        #
+        # Reuses RULE 2 (DOCUMENT_EXPIRATION)'s own date-plausibility
+        # pattern -- parse the printed date, compare it against today --
+        # applied to a Visa's 'Stay Duration' field instead of a generic
+        # document expiry. This is deliberately a separate rule from RULE 2
+        # rather than populating date_of_expiry for visas: a visa's own
+        # validity window (when it can be used to enter) and the permitted
+        # duration of a given stay are genuinely distinct concepts on a
+        # real visa, and an overstayed traveler is exactly the kind of
+        # finding a border-screening tool must not silently miss. CRITICAL
+        # severity mirrors DOCUMENT_EXPIRATION's own: an overstayed visa is
+        # not valid for continued presence, the same way an expired
+        # document isn't valid for travel.
+        if fields.get("document_type") == "VISA":
+            stay_until = cls.parse_ddmmyyyy(fields.get("stay_duration_until"))
+            if stay_until:
+                if stay_until < today:
+                    results.append({
+                        "rule": "VISA_STAY_DURATION_VALIDATION",
+                        "passed": False,
+                        "severity": "CRITICAL",
+                        "explanation": f"Authorized stay duration expired on {stay_until.strftime('%Y-%m-%d')} (Current date: {today.strftime('%Y-%m-%d')}).",
+                        "confidence": 0.97
+                    })
+                    signals.append({
+                        "module": "VALIDATION",
+                        "signal": "Visa Stay Duration Expired",
+                        "severity": "CRITICAL",
+                        "confidence": 0.97,
+                        "explanation": f"Authorized stay duration on this visa expired on {stay_until.strftime('%Y-%m-%d')}. Holder is not authorized for continued presence.",
+                        "score_impact": 24.0
+                    })
+                else:
+                    results.append({
+                        "rule": "VISA_STAY_DURATION_VALIDATION",
+                        "passed": True,
+                        "severity": "LOW",
+                        "explanation": f"Authorized stay is valid until {stay_until.strftime('%Y-%m-%d')}.",
+                        "confidence": 0.97
+                    })
+            else:
+                results.append({
+                    "rule": "VISA_STAY_DURATION_VALIDATION",
+                    "passed": True,
+                    "severity": "LOW",
+                    "explanation": "Stay duration verified or pending visual confirmation.",
+                    "confidence": 0.80
                 })
 
         passed_count = sum(1 for r in results if r["passed"])

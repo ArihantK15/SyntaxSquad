@@ -632,3 +632,111 @@ def test_extract_text_routes_to_voter_id_parser_and_tags_document_type(monkeypat
     assert result["fields"]["document_type"] == "VOTER_ID"
     assert result["fields"]["document_number"] == "ABC1234567"
     assert result["fields"]["full_name"] == "ANJALI NAIR"
+
+
+def test_detect_document_type_recognizes_visa_markers():
+    raw_text = "ENTRY VISA\nBUREAU OF IMMIGRATION • REPUBLIC OF UTOPIA\nVISA NUMBER\nUV1234567\n"
+    assert TesseractOCRService._detect_document_type(raw_text) == "VISA"
+
+
+def test_visa_marker_does_not_collide_with_stamp_manipulated_passport_text():
+    """
+    generate_document's own 'stamp_manipulated'/'multiple_anomalies' modes
+    draw a simulated pasted stamp reading "VISA EXEMPTION [SIMULATED
+    PATCH]" directly onto a PASSPORT specimen (see synthetic_generator.py).
+    A bare "VISA" substring marker would misroute that tampered passport to
+    the visa field parser instead of the passport one -- VISA_MARKERS must
+    require a more specific phrase that this stamp text never contains.
+    """
+    raw_text = (
+        "DEMO TRAVEL DOCUMENT\n"
+        "REPUBLIC OF UTOPIA • FICTIONAL TEST SPECIMEN\n"
+        "VISA EXEMPTION\n"
+        "[SIMULATED PATCH]\n"
+    )
+    assert TesseractOCRService._detect_document_type(raw_text) == "PASSPORT"
+
+
+def test_visa_fields_extract_all_four_new_fields_plus_baseline():
+    raw_text = (
+        "ENTRY VISA\n"
+        "BUREAU OF IMMIGRATION\n"
+        "VISA NUMBER\n"
+        "UV1234567\n"
+        "FULL NAME\n"
+        "CARLOS MENDEZ\n"
+        "NATIONALITY\n"
+        "UTOPIAN\n"
+        "DATE OF BIRTH\n"
+        "14/03/1985\n"
+        "VISA TYPE\n"
+        "BUSINESS\n"
+        "ENTRY VALIDATION\n"
+        "MULTIPLE ENTRY\n"
+        "DATE OF ISSUE\n"
+        "01/01/2026\n"
+        "STAY DURATION\n"
+        "30/06/2026\n"
+    )
+    lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
+    fields = svc.parse_visa_fields(raw_text, lines)
+    assert fields["document_number"] == "UV1234567"
+    assert fields["full_name"] == "CARLOS MENDEZ"
+    assert fields["nationality"] == "UTOPIAN"
+    assert fields["date_of_birth"] == "14/03/1985"
+    assert fields["visa_type"] == "BUSINESS"
+    assert fields["entry_validation"] == "MULTIPLE ENTRY"
+    assert fields["date_of_issue"] == "01/01/2026"
+    assert fields["stay_duration_until"] == "30/06/2026"
+    assert fields["country"] == "REPUBLIC OF UTOPIA"
+
+
+def test_visa_number_survives_tesseract_misreading_number_as_numbef():
+    """
+    Reproduces a real failure found by rendering an actual visa specimen
+    through real Tesseract: the small label-font "R" in "VISA NUMBER" was
+    misread as "VISA NUMBEF" -- an exact-match \bVISA NUMBER\b search
+    returns None entirely on this single-character slip. Same class of bug
+    DL's "VALID TILL" -> "VAUD TILL" fix addressed.
+    """
+    raw_text = (
+        "ENTRY VISA\n"
+        "VISA NUMBEF\n"
+        "UV1234567\n"
+    )
+    lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
+    fields = svc.parse_visa_fields(raw_text, lines)
+    assert fields["document_number"] == "UV1234567"
+
+
+def test_visa_stay_duration_is_none_when_label_missing():
+    """No fabricated date when the field simply isn't present on the document."""
+    raw_text = "ENTRY VISA\nBUREAU OF IMMIGRATION\nVISA NUMBER\nUV1234567\n"
+    lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
+    fields = svc.parse_visa_fields(raw_text, lines)
+    assert fields["stay_duration_until"] is None
+
+
+def test_extract_text_routes_to_visa_parser_and_tags_document_type(monkeypatch):
+    visa_raw = (
+        "ENTRY VISA\n"
+        "BUREAU OF IMMIGRATION\n"
+        "VISA NUMBER\n"
+        "UV1234567\n"
+        "FULL NAME\n"
+        "CARLOS MENDEZ\n"
+        "VISA TYPE\n"
+        "BUSINESS\n"
+        "ENTRY VALIDATION\n"
+        "MULTIPLE ENTRY\n"
+        "STAY DURATION\n"
+        "30/06/2026\n"
+    )
+    monkeypatch.setattr(svc, "preprocess_image", lambda path: None)
+    monkeypatch.setattr("pytesseract.image_to_data", lambda *a, **k: {"conf": []})
+    monkeypatch.setattr("pytesseract.image_to_string", lambda *a, **k: visa_raw)
+
+    result = svc.extract_text("unused.jpg")
+    assert result["fields"]["document_type"] == "VISA"
+    assert result["fields"]["document_number"] == "UV1234567"
+    assert result["fields"]["stay_duration_until"] == "30/06/2026"

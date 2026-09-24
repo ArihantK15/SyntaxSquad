@@ -158,6 +158,22 @@ SCENARIO_CONFIGS = {
         "sex": "FEMALE",
         "doc_face_photo": PERSON_A, "live_face_photo": PERSON_A  # same person -> MATCH
     },
+    "visa": {
+        "title": "Travel Visa — Stay Duration Expired",
+        "mode": "expired",
+        "document_type": "VISA",
+        "surname": "MENDEZ",
+        "given_names": "CARLOS",
+        "nationality": "ATLANTIAN",
+        "country_name": "REPUBLIC OF UTOPIA",
+        "doc_number": "UV1234567",
+        "dob": "850314",
+        "visa_type": "BUSINESS",
+        "entry_validation": "MULTIPLE ENTRY",
+        "issue": "260101",
+        "stay_duration": "260630",  # overridden to a fixed past date by generate_visa's 'expired' mode
+        "doc_face_photo": PERSON_A, "live_face_photo": PERSON_A  # same person -> MATCH
+    },
     "duplicate_identity": {
         "title": "Duplicate Identity Detection",
         "mode": "genuine",
@@ -209,6 +225,7 @@ DOCUMENT_TYPE_LABELS = {
     "PAN": "PAN",
     "DRIVING_LICENSE": "Driving Licence",
     "VOTER_ID": "Voter ID",
+    "VISA": "Travel Visa",
 }
 
 @router.post("/scenario")
@@ -286,6 +303,21 @@ def _execute_scenario(cfg: Dict[str, Any], db: Session, check_duplicate_identity
             doc_number=cfg["doc_number"],
             dob_yymmdd=cfg["dob"],
             sex=cfg["sex"],
+            face_photo_path=cfg["doc_face_photo"]
+        )
+    elif doc_type == "VISA":
+        SyntheticDocumentGenerator.generate_visa(
+            out_path=doc_path,
+            mode=cfg["mode"],
+            surname=cfg["surname"],
+            given_names=cfg["given_names"],
+            nationality=cfg["nationality"],
+            doc_number=cfg["doc_number"],
+            dob_yymmdd=cfg["dob"],
+            visa_type=cfg["visa_type"],
+            entry_validation=cfg["entry_validation"],
+            issue_yymmdd=cfg["issue"],
+            stay_duration_yymmdd=cfg["stay_duration"],
             face_photo_path=cfg["doc_face_photo"]
         )
     else:

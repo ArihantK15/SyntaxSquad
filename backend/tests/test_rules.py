@@ -350,3 +350,79 @@ def test_voter_id_rule_skipped_for_non_voter_id_documents():
     ocr_data = {"fields": {"document_number": "ABC1234567", "document_type": "PASSPORT"}}
     eval_res = DocumentRulesEngine.evaluate(ocr_data, None)
     assert not any(r["rule"] == "VOTER_ID_FORMAT_VALIDATION" for r in eval_res["rules_detail"])
+
+def test_visa_document_not_penalized_for_missing_mrz():
+    """A Visa is visually extracted only (no ICAO MRZ modeled) -- same MRZ
+    exemption as Aadhaar/PAN/DL/Voter ID."""
+    ocr_data = {
+        "fields": {
+            "full_name": "CARLOS MENDEZ",
+            "document_number": "UV1234567",
+            "document_type": "VISA"
+        }
+    }
+    eval_res = DocumentRulesEngine.evaluate(ocr_data, None)
+    assert not any(s["signal"] == "Missing Machine Readable Zone" for s in eval_res["signals"])
+    mrz_rule = [r for r in eval_res["rules_detail"] if r["rule"] == "MRZ_PRESENCE"][0]
+    assert mrz_rule["passed"] is True
+
+def test_visa_stay_duration_expired_flags_critical():
+    """
+    Reuses RULE 2 (DOCUMENT_EXPIRATION)'s own date-plausibility pattern
+    (parse_ddmmyyyy, compare against today) applied to the visa's own
+    'Stay Duration' field rather than a generic document expiry -- an
+    overstay-relevant date distinct from the visa's own issue window.
+    """
+    ocr_data = {
+        "fields": {
+            "document_number": "UV1234567",
+            "document_type": "VISA",
+            "stay_duration_until": "01/01/2020"  # expired
+        }
+    }
+    eval_res = DocumentRulesEngine.evaluate(ocr_data, None)
+    visa_rule = [r for r in eval_res["rules_detail"] if r["rule"] == "VISA_STAY_DURATION_VALIDATION"][0]
+    assert visa_rule["passed"] is False
+    assert visa_rule["severity"] == "CRITICAL"
+    signal = [s for s in eval_res["signals"] if s["signal"] == "Visa Stay Duration Expired"][0]
+    assert signal["severity"] == "CRITICAL"
+
+def test_visa_stay_duration_valid_passes():
+    ocr_data = {
+        "fields": {
+            "document_number": "UV1234567",
+            "document_type": "VISA",
+            "stay_duration_until": "30/06/2031"  # not yet expired
+        }
+    }
+    eval_res = DocumentRulesEngine.evaluate(ocr_data, None)
+    visa_rule = [r for r in eval_res["rules_detail"] if r["rule"] == "VISA_STAY_DURATION_VALIDATION"][0]
+    assert visa_rule["passed"] is True
+    assert not any(s["signal"] == "Visa Stay Duration Expired" for s in eval_res["signals"])
+
+def test_visa_stay_duration_missing_pends_visual_confirmation():
+    """No stay-duration date extracted -- LOW/pending, not penalized, same
+    posture as RULE 2's own missing-expiry branch."""
+    ocr_data = {
+        "fields": {
+            "document_number": "UV1234567",
+            "document_type": "VISA"
+        }
+    }
+    eval_res = DocumentRulesEngine.evaluate(ocr_data, None)
+    visa_rule = [r for r in eval_res["rules_detail"] if r["rule"] == "VISA_STAY_DURATION_VALIDATION"][0]
+    assert visa_rule["passed"] is True
+    assert not any(s["signal"] == "Visa Stay Duration Expired" for s in eval_res["signals"])
+
+def test_visa_rule_skipped_for_non_visa_documents():
+    """A visa-shaped stay_duration_until on a passport must not trigger
+    visa-specific validation -- the rule is gated on document_type."""
+    ocr_data = {
+        "fields": {
+            "document_number": "UV1234567",
+            "document_type": "PASSPORT",
+            "stay_duration_until": "01/01/2020"
+        }
+    }
+    eval_res = DocumentRulesEngine.evaluate(ocr_data, None)
+    assert not any(r["rule"] == "VISA_STAY_DURATION_VALIDATION" for r in eval_res["rules_detail"])

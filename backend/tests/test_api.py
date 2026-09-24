@@ -169,28 +169,63 @@ def test_voter_id_demo_scenario_runs_clean_through_the_full_pipeline():
     assert voter_id_rule["passed"] is True
 
 
-def test_duplicate_identity_demo_scenario_flags_critical_via_gallery_match():
+def test_visa_stay_duration_expired_demo_scenario_is_flagged_critical():
     """
-    Two entirely different fabricated identities (different name, different
-    passport number) but the SAME underlying live face photo (PERSON_A) --
-    both documents are otherwise clean (valid MRZ, no tamper, a genuine
-    face match on their own document). The only reason this comes back
-    CRITICAL is the cross-case duplicate-identity gallery hit: this real
-    person was already screened once under a different name.
+    A Visa has no ICAO MRZ modeled (extract-only, same posture as
+    Aadhaar's document number -- no fabricated checksum). Its 'Stay
+    Duration' field is the actual value of the new
+    VISA_STAY_DURATION_VALIDATION rule: an overstayed visa must be caught
+    the same way an expired passport/DL already is, via the same
+    CRITICAL-floors-to-at-least-HIGH mechanism.
     """
-    response = client.post("/api/demo/scenario", json={"scenario_key": "duplicate_identity"})
+    response = client.post("/api/demo/scenario", json={"scenario_key": "visa"})
     assert response.status_code == 200
     data = response.json()
     assert data["risk_level"] in ("HIGH", "CRITICAL")
 
     detail = client.get(f"/api/cases/{data['case_id']}").json()
+    assert detail["document_type"] == "Travel Visa"
+    analysis = detail["analyses"][0]
+    assert analysis["ocr_result"]["fields"]["document_type"] == "VISA"
+    assert analysis["mrz_result"] is None
+
+    visa_rule = [r for r in analysis["validation_result"]["rules_detail"] if r["rule"] == "VISA_STAY_DURATION_VALIDATION"][0]
+    assert visa_rule["passed"] is False
+    assert any(s["signal"] == "Visa Stay Duration Expired" for s in detail["risk_signals"])
+
+
+def test_duplicate_identity_demo_scenario_flags_a_high_severity_corroborating_signal():
+    """
+    Two entirely different fabricated identities (different name, different
+    passport number) but the SAME underlying live face photo (PERSON_A) --
+    both documents are otherwise clean (valid MRZ, no tamper, a genuine
+    face match on their own document). The elevated risk here comes
+    entirely from the cross-case duplicate-identity gallery hit: this real
+    person was already screened once under a different name.
+
+    HIGH severity, not CRITICAL, and no automatic floor to HIGH/CRITICAL --
+    scripts/evaluate_gallery_scale_far.py measured a 26% real 1:N
+    false-accept rate for this gallery match at scale, so it's modeled as a
+    material but non-overriding corroborating signal (see risk_engine.py's
+    duplicate-identity comment), not a near-certain rule violation the way
+    an expired document or watchlist hit is.
+    """
+    response = client.post("/api/demo/scenario", json={"scenario_key": "duplicate_identity"})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["risk_level"] != "LOW"
+
+    detail = client.get(f"/api/cases/{data['case_id']}").json()
     identity_signals = [s for s in detail["risk_signals"] if s["module"] == "IDENTITY"]
     assert len(identity_signals) == 1
-    assert identity_signals[0]["severity"] == "CRITICAL"
+    assert identity_signals[0]["severity"] == "HIGH"
     assert "Possible Duplicate Identity" in identity_signals[0]["signal"]
 
     analysis = detail["analyses"][0]
     assert analysis["face_result"]["status"] == "MATCH"  # clean on its own document
+    assert analysis["risk_breakdown"] is not None
+    identity_entry = next(b for b in analysis["risk_breakdown"] if b["factor"] == "Cross-Case Duplicate Identity")
+    assert identity_entry["weighted_contribution"] == 30.0
 
 def test_demo_scenario_failure_does_not_leave_a_zombie_case():
     """

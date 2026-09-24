@@ -7,14 +7,29 @@ from app.ml.face_verifier import FaceDetectorAndVerifier
 from app.core.encryption import encrypt_embedding, decrypt_embedding
 
 # Stricter than the 0.72 same-session 1:1 MATCH_THRESHOLD (face_service.py).
-# A 1:N gallery search's false-accept risk compounds across every entry
-# checked -- at 0.72, LFW-measured FAR is 0.60% PER comparison, so expected
-# false hits grow roughly linearly with gallery size (N * FAR). Re-measuring
-# FAR at stricter thresholds against the same LFW impostor pairs
-# calibrate_face_threshold.py uses: 0.00% observed at 0.80 (no false accepts
-# in 500 impostor pairs -- the resolution floor of that test set, i.e.
-# <=0.2%, not a proven zero). 0.80 is what keeps this usable as the gallery
-# grows without accusing an innocent traveler of running a false identity.
+# 0.80 was originally picked from a 1:1 LFW pairs benchmark (0.00% false
+# accepts across 500 impostor PAIRS -- calibrate_face_threshold.py), which
+# the code here used to describe as "not a proven zero," resolution floor
+# <=0.2%. scripts/evaluate_gallery_scale_far.py then measured the REAL 1:N
+# behavior directly: a 1,200-identity gallery, 500 genuine-impostor probes,
+# max similarity against the WHOLE gallery per probe (what find_gallery_match
+# below actually computes) -- empirical 1:N false-accept rate at 0.80 was
+# 26.0%, i.e. roughly 1 in 4 innocent travelers would "match" someone
+# unrelated purely from gallery-size compounding. Raising the threshold
+# doesn't fix this cleanly either: 0.90 gets 1:N FAR down to 0.2%, but at the
+# cost of missing 57% of genuine duplicate-identity matches (measured on the
+# same run, 30 true-duplicate probes). No single threshold gives both a safe
+# FAR and useful recall at this gallery size.
+#
+# Given that, 0.80 is kept (93% recall on genuine duplicates at this
+# threshold, measured on the same run) and the FIX is on the consumer side,
+# not here: risk_engine.py no longer treats a gallery match as CRITICAL
+# severity / an automatic floor-to-HIGH verdict -- a signal with a 1-in-4
+# false-positive rate at usable recall isn't a near-certain rule violation.
+# It's now HIGH severity, added as real (but not overriding) weight to the
+# score, explicitly framed to the officer as a corroborating lead requiring
+# review, not confirmed identity fraud. See risk_engine.py's own comment at
+# its duplicate-identity block for the consumer-side half of this.
 GALLERY_MATCH_THRESHOLD = 0.80
 
 

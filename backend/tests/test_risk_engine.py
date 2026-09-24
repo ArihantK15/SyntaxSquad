@@ -98,13 +98,55 @@ def test_risk_engine_isolated_critical_signal_floors_to_high():
 def test_risk_engine_breakdown_reconciles_to_total_when_critical_floor_applies():
     """
     Reproduces a real credibility gap in the "Explainable risk breakdown"
-    panel: when an isolated CRITICAL signal (e.g. a cross-case duplicate-
-    identity match, which deliberately carries no weighted factor of its
-    own) floors the score, the 5 weighted categories previously summed to
-    far less than the displayed total with no line item accounting for the
-    difference -- in a panel literally named "Explainable". The floor must
-    now appear as its own breakdown entry, named after the triggering
-    signal, whose contribution makes the categories sum back to the total.
+    panel: when an isolated CRITICAL signal (e.g. a CRITICAL tamper verdict,
+    which deliberately carries no weighted factor of its own beyond its
+    normal tamper contribution) floors the score, the 5 weighted categories
+    previously summed to far less than the displayed total with no line
+    item accounting for the difference -- in a panel literally named
+    "Explainable". The floor must now appear as its own breakdown entry,
+    named after the triggering signal, whose contribution makes the
+    categories sum back to the total.
+
+    Uses a CRITICAL tamper verdict rather than a duplicate-identity match to
+    trigger the floor here -- duplicate-identity no longer floors at all
+    (see test_risk_engine_duplicate_identity_match_is_a_high_severity_
+    corroborating_signal_not_a_floor below for why: a 26% 1:N false-accept
+    rate at gallery scale, measured by scripts/evaluate_gallery_scale_far.py,
+    means it isn't the near-certain violation CRITICAL implies).
+    """
+    engine = RiskEngine()
+    validation_data = {"passed_count": 5, "failed_count": 0, "signals": []}
+    tamper_data = {
+        "tamper_risk": 0.91,
+        "risk_level": "CRITICAL",
+        "signals": [{"type": "photo_boundary_anomaly", "confidence": 0.95, "explanation": "Photo splicing detected."}]
+    }
+    face_data = {"similarity": 0.97, "status": "MATCH", "signals": []}
+
+    result = engine.calculate(
+        mrz_data={"is_valid": True},
+        validation_data=validation_data,
+        tamper_data=tamper_data,
+        face_data=face_data,
+        watchlist_match=None
+    )
+
+    assert result["critical_floor_applied"] is True
+    floor_entry = next(b for b in result["breakdown"] if b["factor"] == "Critical Signal Floor")
+    assert floor_entry["weight"] is None
+    assert floor_entry["raw_risk"] is None
+
+    reconciled_total = round(sum(b["weighted_contribution"] for b in result["breakdown"]), 1)
+    assert reconciled_total == result["risk_score"]
+
+
+def test_risk_engine_breakdown_reconciles_to_total_with_a_duplicate_identity_contribution():
+    """
+    Same "Explainable" reconciliation requirement as the critical-floor
+    case above, but for duplicate-identity's own flat unweighted addition
+    (see risk_engine.py's comment at the duplicate-identity block): its own
+    "Cross-Case Duplicate Identity" breakdown row must make the 5 weighted
+    categories sum back to the total, the same way the floor row does.
     """
     engine = RiskEngine()
     validation_data = {"passed_count": 5, "failed_count": 0, "signals": []}
@@ -120,11 +162,12 @@ def test_risk_engine_breakdown_reconciles_to_total_when_critical_floor_applies()
         duplicate_identity_match={"case_number": "BM-2026-F0E17", "similarity": 1.0}
     )
 
-    assert result["critical_floor_applied"] is True
-    floor_entry = next(b for b in result["breakdown"] if b["factor"] == "Critical Signal Floor")
-    assert floor_entry["weight"] is None
-    assert floor_entry["raw_risk"] is None
-    assert any("Duplicate Identity" in s for s in floor_entry["top_signals"])
+    assert result["critical_floor_applied"] is False
+    identity_entry = next(b for b in result["breakdown"] if b["factor"] == "Cross-Case Duplicate Identity")
+    assert identity_entry["weight"] is None
+    assert identity_entry["raw_risk"] is None
+    assert identity_entry["weighted_contribution"] == 30.0
+    assert any("Duplicate Identity" in s for s in identity_entry["top_signals"])
 
     reconciled_total = round(sum(b["weighted_contribution"] for b in result["breakdown"]), 1)
     assert reconciled_total == result["risk_score"]
@@ -326,14 +369,20 @@ def test_risk_engine_missing_mrz_dates_never_discounts_face_weight():
     assert face_entry["weight"] == engine.w_face
 
 
-def test_risk_engine_duplicate_identity_match_floors_to_critical_via_existing_mechanism():
+def test_risk_engine_duplicate_identity_match_is_a_high_severity_corroborating_signal_not_a_floor():
     """
     A cross-case duplicate-identity gallery hit (see identity_gallery_service.py)
-    is modeled as a CRITICAL-severity signal under a new "IDENTITY" module --
-    deliberately reusing the SAME hard-stop floor mechanism a watchlist hit or
-    an expired document already uses, rather than adding a new weighted
-    factor (which would need a PolicySettings schema migration). It must
-    floor an otherwise entirely clean screening to at least HIGH.
+    is modeled as a HIGH-severity signal under the "IDENTITY" module, added
+    as a real +30 flat contribution to the score -- deliberately NOT the
+    CRITICAL-floors-to-HIGH treatment this used to get. scripts/
+    evaluate_gallery_scale_far.py measured the REAL 1:N false-accept rate at
+    gallery scale (1,200 identities): 26.0% at this same threshold -- a
+    1-in-4 false-positive rate at usable recall isn't the near-certain rule
+    violation CRITICAL severity implies (an expired document, a watchlist
+    hit), so it must not automatically force the outcome to HIGH regardless
+    of how clean every other signal is. It still needs to materially move
+    the score, or the signal would be silently inert whenever nothing else
+    already crosses the floor.
     """
     engine = RiskEngine()
     validation_data = {"passed_count": 5, "failed_count": 0, "signals": []}
@@ -346,7 +395,15 @@ def test_risk_engine_duplicate_identity_match_floors_to_critical_via_existing_me
         "similarity": 0.97
     }
 
-    result = engine.calculate(
+    result_without = engine.calculate(
+        mrz_data={"is_valid": True},
+        validation_data=validation_data,
+        tamper_data=tamper_data,
+        face_data=face_data,
+        watchlist_match=None,
+        duplicate_identity_match=None
+    )
+    result_with = engine.calculate(
         mrz_data={"is_valid": True},
         validation_data=validation_data,
         tamper_data=tamper_data,
@@ -355,12 +412,14 @@ def test_risk_engine_duplicate_identity_match_floors_to_critical_via_existing_me
         duplicate_identity_match=duplicate_identity_match
     )
 
-    identity_signals = [s for s in result["signals"] if s["module"] == "IDENTITY"]
+    identity_signals = [s for s in result_with["signals"] if s["module"] == "IDENTITY"]
     assert len(identity_signals) == 1
-    assert identity_signals[0]["severity"] == "CRITICAL"
+    assert identity_signals[0]["severity"] == "HIGH"
     assert "BM-2026-PRIOR" in identity_signals[0]["signal"]
-    assert result["critical_floor_applied"] is True
-    assert result["risk_level"] in ("HIGH", "CRITICAL")
+    assert result_with["critical_floor_applied"] is False
+    # A real, material effect on the score -- not silently inert -- but not
+    # an automatic override of an otherwise-clean case either.
+    assert result_with["risk_score"] == round(result_without["risk_score"] + 30.0, 1)
 
 
 def test_risk_engine_no_duplicate_identity_match_emits_no_identity_signal():
