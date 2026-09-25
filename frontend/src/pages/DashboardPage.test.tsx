@@ -66,9 +66,10 @@ describe('DashboardPage', () => {
 
     await waitFor(() => {
       // "42" now also appears in the donut chart's centered total, so scope
-      // this to the "Screened" KPI card specifically rather than asserting
-      // on the bare text, which would otherwise match multiple elements.
-      const screenedCard = screen.getByText('Screened').closest('.p-4') as HTMLElement;
+      // this to the "Screened" stat card specifically (by its stable
+      // data-testid, not a presentational class -- that stays correct
+      // regardless of which components render the card internally).
+      const screenedCard = screen.getByTestId('stat-screened');
       expect(within(screenedCard).getByText('42')).toBeInTheDocument();
     });
     expect(screen.queryByText(/network error/i)).not.toBeInTheDocument();

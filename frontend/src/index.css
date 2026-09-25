@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./precision-light.css";
 
 @theme {
   /* Warm charcoal base/surface/border/text scale -- replaces the default
