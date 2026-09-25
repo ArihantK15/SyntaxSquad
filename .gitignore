@@ -44,6 +44,15 @@ demo_output/
 # Environment variables
 .env
 
+# Local AI-tool MCP configs -- each hardcodes this machine's own absolute
+# Windows path (including the local username) to launch the aletheore MCP
+# server, which has no business being committed to a public repo.
+.mcp.json
+.codex/config.toml
+.cursor/mcp.json
+.kiro/settings/mcp.json
+opencode.json
+
 # Git worktrees
 .worktrees/
 .aletheore/
