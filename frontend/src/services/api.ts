@@ -7,7 +7,9 @@ import {
   OfficerDecision,
   ChainVerificationResult,
   PolicySettings,
-  BlockchainAnchor
+  BlockchainAnchor,
+  ChangeDetectionResult,
+  DpdpComplianceStatus
 } from '../types';
 
 const API_BASE = '/api';
@@ -193,6 +195,12 @@ export const api = {
     return res.json();
   },
 
+  async getDpdpComplianceStatus(): Promise<DpdpComplianceStatus> {
+    const res = await fetch(`${API_BASE}/compliance/dpdp-status`);
+    if (!res.ok) throw new Error('Failed to load DPDP compliance status');
+    return res.json();
+  },
+
   async verifyCaseChain(caseId: string): Promise<ChainVerificationResult> {
     const res = await fetch(`${API_BASE}/audit/cases/${caseId}/verify`);
     if (!res.ok) throw new Error('Case chain verification failed');
@@ -303,6 +311,22 @@ export const api = {
       body: JSON.stringify(params)
     });
     if (!res.ok) throw new Error('Failed to generate specimen document');
+    return res.json();
+  },
+
+  async runChangeDetectionDemo(): Promise<ChangeDetectionResult> {
+    // Generates two specimens and runs OCR/MRZ/face comparison on both --
+    // slower than the other demo endpoints, so this gets its own longer
+    // timeout rather than the shared 20s SCREENING_STEP_TIMEOUT_MS.
+    const res = await fetchWithTimeout(
+      `${API_BASE}/demo/change-detection`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' } },
+      40000
+    );
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.detail || 'Failed to run change detection demo');
+    }
     return res.json();
   },
 

@@ -345,3 +345,13 @@ the real anchoring mechanism without asking anyone to spend real funds or
 depend on mainnet for a prototype. Moving to mainnet would be a
 straightforward config change, not an architecture change, if this went to
 production."
+
+## 12. Case deletion does not repair the audit hash chain
+
+`DELETE /api/cases/{id}` removes that case's `audit_logs` rows outright (via
+`ON DELETE CASCADE`) with no chain-repair step, so deleting any case that
+already has audit entries permanently breaks `/api/audit/verify` for the
+whole ledger from that point forward — the only recovery is truncating
+`audit_logs` (and `blockchain_anchors`, whose anchored hashes stop being
+verifiable once the chain they anchored is gone), since this app has no
+migration tooling to patch the ledger in place.

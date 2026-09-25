@@ -1190,3 +1190,107 @@ def test_uploads_route_404s_for_a_nonexistent_file():
     resp = client.get("/uploads/documents/does-not-exist.jpg")
     assert resp.status_code == 404
 
+
+def test_change_detection_demo_flags_exactly_the_fields_that_were_altered():
+    """
+    Same-Identity Change Detection demo (app.api.routes.demo.run_change_
+    detection_demo): generates two specimens for ONE claimed identity --
+    same surname, given names, document number, nationality and issuing
+    country in both -- but Version 2 has a different date of birth, date of
+    expiry, and portrait photo. Both are generated in mode="genuine", so
+    each specimen's own MRZ checksum is independently valid; only comparing
+    the two catches the altered fields. This must flag precisely the three
+    altered fields as changed and everything else as unchanged -- a diff
+    that flagged everything (or nothing) would be useless regardless of
+    whether it happened to include the real changes.
+    """
+    response = client.post("/api/demo/change-detection", json={})
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["identity"]["surname"] == "OKAFOR"
+    assert data["identity"]["given_names"] == "CHIDI"
+
+    # Both submissions must independently pass MRZ checksum validation --
+    # the whole point of this scenario is that checksum validation alone
+    # can't tell them apart.
+    assert data["v1"]["mrz_checksum_valid"] is True
+    assert data["v2"]["mrz_checksum_valid"] is True
+
+    diffs = {d["field"]: d for d in data["field_diffs"]}
+    for unchanged_field in ["document_number", "surname", "given_names", "nationality", "country"]:
+        assert diffs[unchanged_field]["changed"] is False, f"{unchanged_field} should be unchanged"
+
+    for changed_field in ["birth_date", "expiry_date"]:
+        assert diffs[changed_field]["changed"] is True, f"{changed_field} should be flagged as changed"
+        assert diffs[changed_field]["v1_value"] != diffs[changed_field]["v2_value"]
+        assert diffs[changed_field]["severity"] == "HIGH"
+
+    assert diffs["portrait"]["changed"] is True
+    assert data["portrait_comparison"]["status"] == "PORTRAIT_CHANGED"
+    assert data["portrait_comparison"]["v1_portrait_url"]
+    assert data["portrait_comparison"]["v2_portrait_url"]
+
+    assert set(data["changed_fields"]) == {"Date of Birth", "Date of Expiry", "Portrait Photo"}
+    assert data["changed_field_count"] == 3
+
+    # Both rendered specimen images must actually be fetchable (decrypted
+    # transparently through /uploads, same as every other demo artifact).
+    for version in ["v1", "v2"]:
+        img_resp = client.get(data[version]["document_image_url"])
+        assert img_resp.status_code == 200
+        assert img_resp.headers["content-type"] == "image/jpeg"
+
+
+def test_dpdp_compliance_status_reflects_real_backend_state():
+    """
+    The DPDP compliance dashboard (app.api.routes.compliance) is a pure
+    read-only view over state that already exists elsewhere -- no new write
+    path, no new data model. Every number it returns must be independently
+    reproducible by querying the same tables directly, not something the
+    endpoint computes differently or fabricates. This also deliberately
+    does NOT assert audit_chain.valid is True: earlier tests in this same
+    module (test_case_deletion_requires_officer_auth and friends) delete
+    cases via DELETE /api/cases/{id}, which -- per KNOWN_LIMITATIONS.md #12
+    -- permanently breaks /api/audit/verify for the whole ledger with no
+    repair path. The endpoint reporting that honestly (whatever the current
+    real value is) is the correct behavior, not something to paper over by
+    asserting a specific value here.
+    """
+    from app.core.database import SessionLocal
+    from app.models import Case, AuditLog
+    from app.services.audit_service import AuditService
+
+    res = client.get("/api/compliance/dpdp-status")
+    assert res.status_code == 200
+    data = res.json()
+
+    db = SessionLocal()
+    try:
+        real_total_cases = db.query(Case).count()
+        real_hashed_cases = db.query(Case).filter(Case.document_number_hash.isnot(None)).count()
+        real_purged_cases = db.query(Case).filter(Case.biometrics_purged.is_(True)).count()
+        real_purge_events = db.query(AuditLog).filter(AuditLog.action == "BIOMETRICS_PURGED").count()
+        real_chain = AuditService.verify_chain(db)
+    finally:
+        db.close()
+
+    assert data["identifier_hashing"]["total_cases"] == real_total_cases
+    assert data["identifier_hashing"]["cases_with_hashed_identifier"] == real_hashed_cases
+
+    assert data["biometric_purge"]["cases_purged"] == real_purged_cases
+    assert data["biometric_purge"]["total_cases"] == real_total_cases
+    assert data["biometric_purge"]["audit_events_logged"] == real_purge_events
+
+    assert data["audit_chain"]["valid"] == real_chain["valid"]
+    assert data["audit_chain"]["total_records"] == real_chain["total_records"]
+    assert data["audit_chain"]["reason"] == real_chain["reason"]
+
+    # Structural/static facts -- not numbers, but must not be silently empty.
+    assert "Fernet" in data["encryption"]["algorithm"]
+    assert isinstance(data["encryption"]["using_default_demo_key"], bool)
+    assert "SHA-256" in data["identifier_hashing"]["algorithm"]
+    assert len(data["access_control"]["officer_key_required_for"]) > 0
+    assert len(data["known_gaps"]) > 0
+    assert any("audit" in gap["gap"].lower() for gap in data["known_gaps"])
+

@@ -47,6 +47,29 @@ class FaceVerificationService(BaseFaceService):
         cv2.imwrite(out_path, crop)
         return out_path
 
+    def _detect_document_portrait(self, doc_img: np.ndarray) -> list:
+        """
+        Detects the inset portrait in a document image laid out like this
+        project's own synthetic specimens (portrait in the left ~40-55% of
+        the frame). Tries the left-ROI first -- a passport-style inset
+        portrait is a modest fraction of the full frame, and bounding the
+        detection there means a false-positive on document artwork/text on
+        the right isn't mistaken for the portrait -- then falls back to the
+        whole document image if that misses.
+        """
+        dh, dw = doc_img.shape[:2]
+        doc_left_roi = doc_img[:, 0:int(dw * 0.55)]
+        faces = self.detector.detect_face(
+            doc_left_roi, max_w_ratio=0.55, max_h_ratio=0.75,
+            fallback_rect=(0.05, 0.12, 0.45, 0.55)
+        )
+        if not faces:
+            faces = self.detector.detect_face(
+                doc_img, max_w_ratio=0.4, max_h_ratio=0.75,
+                fallback_rect=(0.05, 0.15, 0.35, 0.55)
+            )
+        return faces
+
     def verify(self, document_image_path: str, live_image_path: str, case_id: str) -> Dict[str, Any]:
         if not os.path.exists(document_image_path):
             raise FileNotFoundError(f"Document image not found: {document_image_path}")
@@ -59,26 +82,7 @@ class FaceVerificationService(BaseFaceService):
         if doc_img is None or live_img is None:
             raise ValueError("Unable to load document or live image for face verification.")
 
-        # Detect face in document
-        # In travel documents, prioritize left side of document
-        dh, dw = doc_img.shape[:2]
-        doc_left_roi = doc_img[:, 0:int(dw * 0.55)]
-        # A passport-style inset portrait is a modest fraction of the ROI; bound the
-        # detection so a false-positive on document artwork/background isn't mistaken
-        # for the portrait, and give an explicit fallback region sized for this
-        # specific (left-cropped) ROI rather than a generic aspect-ratio guess
-        # (see FaceDetectorAndVerifier.detect_face).
-        doc_faces = self.detector.detect_face(
-            doc_left_roi, max_w_ratio=0.55, max_h_ratio=0.75,
-            fallback_rect=(0.05, 0.12, 0.45, 0.55)
-        )
-
-        # Fallback to whole doc if not found in left side
-        if not doc_faces:
-            doc_faces = self.detector.detect_face(
-                doc_img, max_w_ratio=0.4, max_h_ratio=0.75,
-                fallback_rect=(0.05, 0.15, 0.35, 0.55)
-            )
+        doc_faces = self._detect_document_portrait(doc_img)
 
         # Detect face in live image (subject typically fills most of a selfie frame)
         live_faces = self.detector.detect_face(
@@ -94,6 +98,7 @@ class FaceVerificationService(BaseFaceService):
 
         if not doc_faces:
             # Fallback: extract expected passport photo rectangle
+            dh, dw = doc_img.shape[:2]
             px, py, pw, ph = int(dw * 0.05), int(dh * 0.15), int(dw * 0.35), int(dh * 0.55)
             self.crop_and_save(doc_img, (px, py, pw, ph), doc_crop_path)
             doc_face_url = f"/uploads/crops/{case_id}_doc_face.jpg"
@@ -273,6 +278,65 @@ class FaceVerificationService(BaseFaceService):
             # person been screened before under a different claimed
             # identity," not anything about the printed document photo.
             "live_embedding": emb_live.tolist() if emb_live is not None else None
+        }
+
+    def compare_document_portraits(self, path_a: str, path_b: str, comparison_id: str) -> Dict[str, Any]:
+        """
+        Compares the inset portrait photo between two DOCUMENT images of the
+        same layout -- e.g. two submissions claiming to be the same identity
+        (see change_detection_service.py). Unlike verify(), whose second
+        argument is a live capture and gets the whole-frame, selfie-tuned
+        detector, both images here get the document-style left-inset
+        detection, since both are full document renders, not selfies.
+        """
+        if not os.path.exists(path_a):
+            raise FileNotFoundError(f"Document image not found: {path_a}")
+        if not os.path.exists(path_b):
+            raise FileNotFoundError(f"Document image not found: {path_b}")
+
+        img_a = cv2.imread(path_a)
+        img_b = cv2.imread(path_b)
+        if img_a is None or img_b is None:
+            raise ValueError("Unable to load one or both document images for portrait comparison.")
+
+        faces_a = self._detect_document_portrait(img_a)
+        faces_b = self._detect_document_portrait(img_b)
+
+        crops_dir = os.path.join(settings.UPLOAD_DIR, "crops")
+        crop_a_path = os.path.join(crops_dir, f"{comparison_id}_v1_portrait.jpg")
+        crop_b_path = os.path.join(crops_dir, f"{comparison_id}_v2_portrait.jpg")
+
+        if not faces_a or not faces_b:
+            if faces_a:
+                self.crop_and_save(img_a, faces_a[0], crop_a_path)
+            if faces_b:
+                self.crop_and_save(img_b, faces_b[0], crop_b_path)
+            missing = "first" if not faces_a else "second"
+            return {
+                "similarity": 0.0,
+                "status": "NO_FACE_DETECTED",
+                "v1_portrait_url": f"/uploads/crops/{comparison_id}_v1_portrait.jpg" if faces_a else None,
+                "v2_portrait_url": f"/uploads/crops/{comparison_id}_v2_portrait.jpg" if faces_b else None,
+                "match_threshold": self.MATCH_THRESHOLD,
+                "issue": f"Could not detect a clear portrait in the {missing} document image."
+            }
+
+        self.crop_and_save(img_a, faces_a[0], crop_a_path)
+        self.crop_and_save(img_b, faces_b[0], crop_b_path)
+
+        ax, ay, aw, ah = faces_a[0]
+        bx, by, bw, bh = faces_b[0]
+        emb_a = self.detector.extract_embedding(img_a[ay:ay + ah, ax:ax + aw])
+        emb_b = self.detector.extract_embedding(img_b[by:by + bh, bx:bx + bw])
+        similarity = self.detector.compare_faces(emb_a, emb_b)
+        is_match = similarity >= self.MATCH_THRESHOLD
+
+        return {
+            "similarity": round(similarity, 3),
+            "status": "SAME_PORTRAIT" if is_match else "PORTRAIT_CHANGED",
+            "v1_portrait_url": f"/uploads/crops/{comparison_id}_v1_portrait.jpg",
+            "v2_portrait_url": f"/uploads/crops/{comparison_id}_v2_portrait.jpg",
+            "match_threshold": self.MATCH_THRESHOLD,
         }
 
 def get_face_service() -> BaseFaceService:

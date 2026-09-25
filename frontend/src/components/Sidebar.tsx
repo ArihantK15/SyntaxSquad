@@ -8,7 +8,9 @@ import {
   History,
   Settings,
   Shield,
-  Radio
+  Radio,
+  GitCompare,
+  Scale
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -27,6 +29,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'screening', label: 'New Screening', icon: Scan },
     { id: 'queue', label: 'Review Queue', icon: Inbox, badge: pendingCount },
     { id: 'cases', label: 'Cases Archive', icon: FileText },
+    { id: 'change_detection', label: 'Change Detection', icon: GitCompare },
+    { id: 'compliance', label: 'DPDP Compliance', icon: Scale },
     { id: 'analytics', label: 'Analytics', icon: BarChart3 },
     { id: 'audit', label: 'Audit Trail', icon: History },
     { id: 'settings', label: 'System Settings', icon: Settings },

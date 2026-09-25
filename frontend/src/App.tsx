@@ -10,6 +10,8 @@ import { AnalyticsPage } from './pages/AnalyticsPage';
 import { AuditTrailPage } from './pages/AuditTrailPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { CaseDetailPage } from './pages/CaseDetailPage';
+import { ChangeDetectionPage } from './pages/ChangeDetectionPage';
+import { ComplianceDashboardPage } from './pages/ComplianceDashboardPage';
 
 export const App: React.FC = () => {
   const [currentTab, setCurrentTab] = useState<string>('dashboard');
@@ -81,6 +83,14 @@ export const App: React.FC = () => {
 
           {currentTab === 'settings' && (
             <SettingsPage />
+          )}
+
+          {currentTab === 'change_detection' && (
+            <ChangeDetectionPage />
+          )}
+
+          {currentTab === 'compliance' && (
+            <ComplianceDashboardPage />
           )}
 
           {currentTab === 'detail' && selectedCaseId && (

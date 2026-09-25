@@ -20,6 +20,7 @@ from app.services.tamper_service import get_tamper_service
 from app.services.face_service import get_face_service
 from app.services.watchlist_service import get_watchlist_provider
 from app.services.identity_gallery_service import IdentityGalleryService
+from app.services.change_detection_service import ChangeDetectionService
 from app.services.risk_engine import get_risk_engine
 from app.services.policy_service import get_policy
 from app.services.audit_service import AuditService
@@ -211,6 +212,23 @@ _DUPLICATE_IDENTITY_PRIOR_CONFIG = {
     "expiry": "300101",
     "doc_face_photo": PERSON_A, "live_face_photo": PERSON_A
 }
+
+# Fixed synthetic identity for the "Same-Identity Change Detection" demo
+# (run_change_detection_demo below). Not itself a SCENARIO_CONFIGS entry --
+# unlike every scenario above, this flow scores nothing and creates no
+# Case/DocumentAnalysis row; it generates TWO specimens for one claimed
+# identity and reports which specific fields differ between them, so it
+# gets its own dedicated request/response shape instead of squeezing into
+# the single-document risk-scoring contract every other scenario shares.
+_CHANGE_DETECTION_IDENTITY = {
+    "surname": "OKAFOR",
+    "given_names": "CHIDI",
+    "country_code": "UTO",
+    "country_name": "REPUBLIC OF UTOPIA",
+    "doc_number": "X7741230",
+    "nationality": "UTOPIAN",
+}
+
 
 # Case.document_type / DocumentAnalysis.document_type display labels, keyed
 # by the SCENARIO_CONFIGS "document_type" tag (which is also what a real
@@ -615,4 +633,174 @@ def generate_specimen_doc(
         "url": f"/uploads/documents/{fname}",
         "mode": mode,
         "doc_number": doc_number
+    }
+
+
+@router.post("/change-detection")
+def run_change_detection_demo(db: Session = Depends(get_db)):
+    """
+    Same-Identity Change Detection demo: generates TWO synthetic specimens
+    for one claimed identity -- "Version 1" (the original, genuine
+    submission) and "Version 2" (a later resubmission of the SAME claimed
+    name, document number, nationality and issuing country, but with date
+    of birth, date of expiry, and the portrait photo all altered) -- then
+    reports exactly which fields differ between them.
+
+    Version 2 is generated in mode="genuine": its MRZ check digits are
+    computed fresh for the new (altered) field values, so it validates
+    perfectly on its own -- ICAO checksum validation alone cannot tell it
+    apart from a legitimate resubmission. What catches it is comparing it
+    against the specific values printed on the earlier submission, which is
+    the entire point of this scenario.
+
+    Zero real-identity risk: both specimens are the same synthetic
+    fictional "REPUBLIC OF UTOPIA" identity this demo module already uses
+    everywhere else, generated fresh on every call.
+    """
+    comparison_id = str(uuid.uuid4())
+    identity = _CHANGE_DETECTION_IDENTITY
+
+    v1_filename = f"specimen_{comparison_id}_v1.jpg"
+    v2_filename = f"specimen_{comparison_id}_v2.jpg"
+    v1_path = os.path.join(settings.UPLOAD_DIR, "documents", v1_filename)
+    v2_path = os.path.join(settings.UPLOAD_DIR, "documents", v2_filename)
+
+    # These specific DOB/expiry pairs (not arbitrary) were each verified
+    # against a real Tesseract pass to round-trip through OCR -> MRZ parse
+    # -> checksum validation without misreads (see _load_font's own
+    # docstring on small-glyph rendering artifacts). A few other plausible-
+    # looking YYMMDD pairs tried during development produced a genuine OCR
+    # misread of the MRZ padding run around specific digit sequences,
+    # corrupting the parsed checksum -- an artifact of this rendering/OCR
+    # pipeline, not of the change-detection logic being demonstrated here.
+    # 950512/281115 for v2 already appears elsewhere in this module (the
+    # "mrz_tampering" scenario's SHARMA identity), so it's proven twice over.
+    SyntheticDocumentGenerator.generate_document(
+        out_path=v1_path,
+        mode="genuine",
+        surname=identity["surname"],
+        given_names=identity["given_names"],
+        country_code=identity["country_code"],
+        country_name=identity["country_name"],
+        doc_number=identity["doc_number"],
+        nationality=identity["nationality"],
+        dob_yymmdd="880610",
+        expiry_yymmdd="300101",
+        face_photo_path=PERSON_A
+    )
+    SyntheticDocumentGenerator.generate_document(
+        out_path=v2_path,
+        mode="genuine",
+        surname=identity["surname"],
+        given_names=identity["given_names"],
+        country_code=identity["country_code"],
+        country_name=identity["country_name"],
+        doc_number=identity["doc_number"],
+        nationality=identity["nationality"],
+        dob_yymmdd="950512",
+        expiry_yymmdd="281115",
+        face_photo_path=PERSON_B
+    )
+
+    # Both generator calls above wrote plaintext straight to their final
+    # resting places under UPLOAD_DIR -- encrypt in place before anything
+    # else touches them, matching every other demo/screening flow.
+    encrypt_file_in_place(v1_path)
+    encrypt_file_in_place(v2_path)
+
+    AuditService.log(
+        db, "CHANGE_DETECTION_DEMO_STARTED", None, actor="OFFICER-DEMO-01",
+        metadata={"identity": f"{identity['surname']} {identity['given_names']}", "document_number": identity["doc_number"]}
+    )
+
+    with decrypted_tempfile(v1_path) as v1_tmp, decrypted_tempfile(v2_path) as v2_tmp:
+        ocr_svc = get_ocr_service()
+        ocr_v1 = ocr_svc.extract_text(v1_tmp)
+        ocr_v2 = ocr_svc.extract_text(v2_tmp)
+
+        # Prefer the dedicated MRZ-band OCR pass over the general whole-
+        # document pass, same as every other scenario in this module (see
+        # _execute_scenario's own comment) -- the general pass misreads the
+        # small MRZ font far more.
+        mrz_lines_v1 = ocr_svc.extract_mrz_lines(v1_tmp) if hasattr(ocr_svc, "extract_mrz_lines") else []
+        mrz_lines_v2 = ocr_svc.extract_mrz_lines(v2_tmp) if hasattr(ocr_svc, "extract_mrz_lines") else []
+        mrz_v1 = (
+            MRZService.parse_pre_isolated_lines(mrz_lines_v1) if len(mrz_lines_v1) >= 2 else None
+        ) or MRZService.extract_mrz_from_lines(ocr_v1.get("detected_lines", []))
+        mrz_v2 = (
+            MRZService.parse_pre_isolated_lines(mrz_lines_v2) if len(mrz_lines_v2) >= 2 else None
+        ) or MRZService.extract_mrz_from_lines(ocr_v2.get("detected_lines", []))
+
+        if not mrz_v1 or not mrz_v2:
+            # Report the failure plainly rather than silently diffing two
+            # empty field sets, which would misreport as "no changes
+            # detected" -- see CLAUDE.md on not letting an unverifiable
+            # result stand in for a real one.
+            raise HTTPException(
+                status_code=500,
+                detail="Could not extract a valid MRZ from one or both generated specimens; change detection requires both submissions to parse successfully."
+            )
+
+        face_svc = get_face_service()
+        portrait_result = face_svc.compare_document_portraits(v1_tmp, v2_tmp, comparison_id)
+
+    # compare_document_portraits wrote whichever crop(s) it managed to
+    # produce as plaintext directly to their final path -- encrypt whatever
+    # actually exists (a crop isn't guaranteed on every code path, e.g.
+    # NO_FACE_DETECTED on one side).
+    crops_dir = os.path.join(settings.UPLOAD_DIR, "crops")
+    for artifact_path in [
+        os.path.join(crops_dir, f"{comparison_id}_v1_portrait.jpg"),
+        os.path.join(crops_dir, f"{comparison_id}_v2_portrait.jpg"),
+    ]:
+        if os.path.exists(artifact_path):
+            encrypt_file_in_place(artifact_path)
+
+    field_diffs = ChangeDetectionService.compare_mrz_identity(mrz_v1, mrz_v2)
+
+    portrait_changed = portrait_result.get("status") == "PORTRAIT_CHANGED"
+    field_diffs.append({
+        "field": "portrait",
+        "label": "Portrait Photo",
+        "v1_value": "See image",
+        "v2_value": "See image",
+        "changed": portrait_changed,
+        "severity": "HIGH" if portrait_changed else "LOW",
+    })
+
+    changed = [d for d in field_diffs if d["changed"]]
+
+    AuditService.log(
+        db, "CHANGE_DETECTION_DEMO_COMPLETED", None, actor="AI-CHANGE-DETECTION",
+        metadata={
+            "identity": f"{identity['surname']} {identity['given_names']}",
+            "changed_fields": [d["field"] for d in changed],
+            "changed_field_count": len(changed),
+        }
+    )
+
+    return {
+        "comparison_id": comparison_id,
+        "identity": {
+            "surname": identity["surname"],
+            "given_names": identity["given_names"],
+            "document_number": identity["doc_number"],
+            "country": identity["country_name"],
+        },
+        "v1": {
+            "label": "Version 1 — Original Submission",
+            "document_image_url": f"/uploads/documents/{v1_filename}",
+            "mrz_checksum_valid": mrz_v1.get("is_valid", False),
+            "ocr_confidence": ocr_v1.get("confidence"),
+        },
+        "v2": {
+            "label": "Version 2 — Resubmission",
+            "document_image_url": f"/uploads/documents/{v2_filename}",
+            "mrz_checksum_valid": mrz_v2.get("is_valid", False),
+            "ocr_confidence": ocr_v2.get("confidence"),
+        },
+        "portrait_comparison": portrait_result,
+        "field_diffs": field_diffs,
+        "changed_field_count": len(changed),
+        "changed_fields": [d["label"] for d in changed],
     }

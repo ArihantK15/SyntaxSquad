@@ -219,3 +219,78 @@ export interface DashboardStats {
   top_risk_reasons: Array<{ reason: string; count: number }>;
   recent_cases: CaseItem[];
 }
+
+export interface FieldDiff {
+  field: string;
+  label: string;
+  v1_value: string | null;
+  v2_value: string | null;
+  changed: boolean;
+  severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+}
+
+export interface PortraitComparisonResult {
+  similarity: number;
+  status: 'SAME_PORTRAIT' | 'PORTRAIT_CHANGED' | 'NO_FACE_DETECTED';
+  v1_portrait_url: string | null;
+  v2_portrait_url: string | null;
+  match_threshold: number;
+  issue?: string;
+}
+
+export interface ChangeDetectionResult {
+  comparison_id: string;
+  identity: {
+    surname: string;
+    given_names: string;
+    document_number: string;
+    country: string;
+  };
+  v1: {
+    label: string;
+    document_image_url: string;
+    mrz_checksum_valid: boolean;
+    ocr_confidence: number;
+  };
+  v2: {
+    label: string;
+    document_image_url: string;
+    mrz_checksum_valid: boolean;
+    ocr_confidence: number;
+  };
+  portrait_comparison: PortraitComparisonResult;
+  field_diffs: FieldDiff[];
+  changed_field_count: number;
+  changed_fields: string[];
+}
+
+export interface DpdpComplianceStatus {
+  generated_at: string;
+  encryption: {
+    algorithm: string;
+    applies_to: string[];
+    using_default_demo_key: boolean;
+  };
+  identifier_hashing: {
+    algorithm: string;
+    field: string;
+    total_cases: number;
+    cases_with_hashed_identifier: number;
+  };
+  biometric_purge: {
+    endpoint: string;
+    total_cases: number;
+    cases_purged: number;
+    audit_events_logged: number;
+  };
+  audit_chain: {
+    valid: boolean;
+    total_records: number;
+    reason: string;
+  };
+  access_control: {
+    mechanism: string;
+    officer_key_required_for: string[];
+  };
+  known_gaps: Array<{ control: string; gap: string }>;
+}
