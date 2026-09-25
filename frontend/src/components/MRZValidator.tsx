@@ -1,15 +1,51 @@
 import React from 'react';
 import { MRZResult, ValidationResult } from '../types';
-import { Binary, CheckCircle2, XCircle, AlertTriangle } from 'lucide-react';
+import { Binary, CheckCircle2, XCircle, AlertTriangle, Info } from 'lucide-react';
 import { SectionHeading } from './SectionHeading';
 
 interface MRZValidatorProps {
   mrz?: MRZResult;
   validation?: ValidationResult;
+  // The OCR-detected document type tag (analysis.ocr_result.fields.
+  // document_type -- "AADHAAR", "PAN", "DRIVING_LICENSE", "VOTER_ID",
+  // "VISA", "PASSPORT"), not the officer's upload-form document-type
+  // selection: that's a user-entered label that can be wrong/mismatched,
+  // while this is what the OCR pass actually identified the document as,
+  // the same signal the backend's own NON_MRZ_DOCUMENT_TYPES gate
+  // already keys off to decide whether to even attempt MRZ extraction.
+  documentType?: string;
 }
 
-export const MRZValidator: React.FC<MRZValidatorProps> = ({ mrz, validation }) => {
+// Kept in sync with (but intentionally not imported from) DocumentRulesEngine
+// .NON_MRZ_DOCUMENT_TYPES / TesseractOCRService.NON_MRZ_DOCUMENT_TYPES on the
+// backend, matching this codebase's existing style of duplicating this exact
+// tuple independently at each of its call sites rather than sharing one
+// constant across the Python backend and this TypeScript frontend.
+const NON_MRZ_DOCUMENT_TYPES = new Set(['AADHAAR', 'PAN', 'DRIVING_LICENSE', 'VOTER_ID', 'VISA']);
+
+export const MRZValidator: React.FC<MRZValidatorProps> = ({ mrz, validation, documentType }) => {
   if (!mrz) {
+    // Absent by design for a document type that never carries an ICAO 9303
+    // MRZ -- not a failure, so it must not read as one. Defaults to the
+    // warning state when documentType is unknown/undefined rather than
+    // assuming inapplicability, since a genuinely MRZ-bearing document
+    // (passport) with no detected MRZ is a real, worth-flagging problem.
+    const isExpectedToBeAbsent = documentType ? NON_MRZ_DOCUMENT_TYPES.has(documentType.toUpperCase()) : false;
+
+    if (isExpectedToBeAbsent) {
+      return (
+        <div className="bg-graphite-900/80 border border-graphite-800 rounded-xl p-5 backdrop-blur text-center">
+          <div className="flex items-center gap-2 mb-2 text-sm font-semibold text-graphite-400">
+            <Info className="w-4 h-4" />
+            <span>MRZ extraction</span>
+          </div>
+          <p className="text-xs text-graphite-500">
+            Not applicable for this document type — no ICAO 9303 Machine Readable Zone by design.
+          </p>
+        </div>
+      );
+    }
+
     return (
       <div className="bg-graphite-900/80 border border-graphite-800 rounded-xl p-5 backdrop-blur text-center">
         <div className="flex items-center gap-2 mb-2 text-sm font-semibold text-amber-400">

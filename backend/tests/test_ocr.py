@@ -186,6 +186,58 @@ def test_aadhaar_full_name_rejects_a_single_garbled_ocr_token():
     assert fields["full_name"] == "Sharaj R Shetty"
 
 
+def test_aadhaar_full_name_rejects_a_multiword_garbled_ocr_run():
+    """
+    Reproduces a real failure reported from an actual Aadhaar test:
+    full_name came back as "weddseah Ja hMA so Hsod" -- not a low-confidence
+    real name, scrambled nonsense. A real Aadhaar prints the holder's name
+    in Hindi (Devanagari) directly above the English name; this Tesseract
+    pass runs with no language flag (English-only by default -- see
+    GENERAL_OCR_CONFIG), so the Devanagari line gets OCR'd as garbled Latin
+    noise. That noise is exactly the "multi-word garbled fragment" gap the
+    single-token fix's own docstring already flagged as unaddressed: it's
+    letters-only, has a space, isn't in the boilerplate exclusion list, and
+    (unlike a real printed name) has no consistent internal capitalization
+    -- "hMA" and "Hsod" are neither Title Case nor ALL CAPS. Requiring
+    every word in the candidate line to be internally consistent with one
+    of those two real-world name-printing conventions rejects this whole
+    class of noise without needing to know what the garbage actually says.
+    """
+    raw_text = (
+        "Government of India\n"
+        "weddseah Ja hMA so Hsod\n"
+        "Unique Identification Authority of India\n"
+        "Ravi Kumar\n"
+        "DOB: 15/08/1990\n"
+        "MALE\n"
+    )
+    lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
+    fields = svc.parse_aadhaar_fields(raw_text, lines)
+    assert fields["full_name"] == "Ravi Kumar"
+
+
+def test_aadhaar_number_not_confused_with_a_16_digit_vid():
+    """
+    Reproduces a real, silent-wrongness bug distinct from the garbled-name
+    one: modern Aadhaar cards also print a 16-digit VID (Virtual ID),
+    conventionally grouped 4-4-4-4 with spaces, alongside the real 12-digit
+    Aadhaar (UID) number. The old regex only checked that the character
+    immediately after a candidate 12-digit run wasn't a bare digit -- a
+    space (the VID's own 4th group separator) satisfied that check fine,
+    so it silently returned the VID's first 12 digits as if they were the
+    actual Aadhaar number: syntactically a perfectly plausible 4-4-4
+    grouped number, but the wrong one entirely, stored/hashed as this
+    person's identity number.
+    """
+    raw_text = (
+        "Government of India\n"
+        "VID: 1234 5678 9012 3456\n"
+        "Ravi Kumar\n"
+        "Aadhaar No: 9876 5432 1098\n"
+    )
+    assert svc._extract_aadhaar_number(raw_text) == "987654321098"
+
+
 def test_full_name_survives_garbled_label():
     """
     Reproduces a real failure observed on a generated specimen: Tesseract

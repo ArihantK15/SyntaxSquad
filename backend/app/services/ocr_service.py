@@ -361,10 +361,26 @@ class TesseractOCRService(BaseOCRService):
         "12345678 9012"), a case a same-either-way regex misses. The `\s?`
         gap still can't match the enrolment ID's "/" separators, so it
         can't accidentally bridge digits out of that field.
+
+        Also distinct from the 16-digit VID (Virtual ID) many modern
+        Aadhaar cards print alongside the UID, conventionally grouped
+        4-4-4-4 the same way -- a real silent-wrongness bug: a version of
+        this regex that only checked the single character immediately
+        after a candidate 12-digit run wasn't a bare digit let a VID's
+        OWN 4th group boundary (a space, not a digit) satisfy that check,
+        silently returning the VID's first 12 digits as this person's
+        Aadhaar number. Matching the FULL surrounding digit-and-single-
+        space cluster first, then requiring it to total exactly 12 digits
+        once spaces are stripped, rejects any longer (or shorter) run as a
+        whole rather than letting a same-length WINDOW inside it match --
+        a 16-digit VID cluster is checked and rejected as one unit, and
+        `finditer` then keeps searching past it for a genuinely separate
+        12-digit cluster elsewhere on the card.
         """
-        m = re.search(r'(?<!\d)(\d{4}\s?\d{4}\s?\d{4})(?!\d)', raw_text)
-        if m:
-            return re.sub(r'\s', '', m.group(1))
+        for m in re.finditer(r'(?<![\d/])\d(?:\s?\d){8,19}(?![\d/])', raw_text):
+            digits = re.sub(r'\s', '', m.group(0))
+            if len(digits) == 12:
+                return digits
         return None
 
     def parse_aadhaar_fields(self, raw_text: str, lines: List[str]) -> Dict[str, Any]:
@@ -454,6 +470,22 @@ class TesseractOCRService(BaseOCRService):
                     "GOVERNMENT", "UNIQUE", "IDENTIFICATION", "AUTHORITY",
                     "AADHAAR", "ENROLMENT", "UIDAI"
                 ])
+                # Closes the "multi-word garbled fragment" gap the single-
+                # token fix above explicitly left open: a real Aadhaar
+                # prints the holder's name in Hindi (Devanagari) directly
+                # above the English name, and this OCR pass runs English-
+                # only (no `-l` flag on GENERAL_OCR_CONFIG), so that line
+                # comes back as garbled Latin-letter noise -- observed live
+                # as "weddseah Ja hMA so Hsod". That noise is letters-only,
+                # multi-word, and dodges the boilerplate exclusion above,
+                # but unlike a real printed name (always either Title Case
+                # or ALL CAPS, consistently) it has no coherent internal
+                # capitalization pattern. `str.istitle()`/`str.isupper()`
+                # already encode exactly that real-world convention
+                # correctly, including for apostrophes/hyphens (e.g.
+                # "O'Brien") and single-letter middle initials -- no need
+                # to hand-roll the same check with a regex.
+                and (clean_l.istitle() or clean_l.isupper())
             ):
                 fields["full_name"] = clean_l
                 break

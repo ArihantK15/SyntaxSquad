@@ -7,6 +7,24 @@ interface OCRResultsProps {
   data?: OCRResult;
 }
 
+// Per UIDAI convention (and this app's own DPDP-dashboard-documented
+// identifier-hashing control): mask a displayed Aadhaar number to only its
+// last 4 digits, grouped 4-4-4 with "X" placeholders (e.g. "XXXX XXXX
+// 2529") -- display-layer only. The backend independently hashes the full,
+// unmasked number for storage (see screening.py's document_number_hash);
+// this never touches that value, only how it's rendered here.
+function maskAadhaarNumber(value: string): string {
+  const digits = value.replace(/\D/g, '');
+  if (digits.length <= 4) return value; // too short to usefully mask
+  const last4 = digits.slice(-4);
+  const maskedCount = digits.length - 4;
+  const maskedGroups: string[] = [];
+  for (let i = 0; i < maskedCount; i += 4) {
+    maskedGroups.push('X'.repeat(Math.min(4, maskedCount - i)));
+  }
+  return [...maskedGroups, last4].join(' ');
+}
+
 export const OCRResults: React.FC<OCRResultsProps> = ({ data }) => {
   const [showRaw, setShowRaw] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -25,9 +43,15 @@ export const OCRResults: React.FC<OCRResultsProps> = ({ data }) => {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const isAadhaar = data.fields.document_type === 'AADHAAR';
+  const documentNumberDisplay =
+    isAadhaar && data.fields.document_number
+      ? maskAadhaarNumber(data.fields.document_number)
+      : data.fields.document_number || '—';
+
   const fields = [
     { label: 'Full Name', value: data.fields.full_name || '—' },
-    { label: 'Document Number', value: data.fields.document_number || '—' },
+    { label: 'Document Number', value: documentNumberDisplay },
     { label: 'Nationality', value: data.fields.nationality || '—' },
     { label: 'Country of Issue', value: data.fields.country || '—' },
     { label: 'Date of Birth', value: data.fields.date_of_birth || '—' },

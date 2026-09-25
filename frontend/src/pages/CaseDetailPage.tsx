@@ -206,6 +206,7 @@ export const CaseDetailPage: React.FC<CaseDetailPageProps> = ({ caseId, onBack }
                 <MRZValidator
                   mrz={analysis?.mrz_result}
                   validation={analysis?.validation_result}
+                  documentType={analysis?.ocr_result?.fields?.document_type}
                 />
               );
             case 'tamper':
