@@ -355,3 +355,41 @@ whole ledger from that point forward — the only recovery is truncating
 `audit_logs` (and `blockchain_anchors`, whose anchored hashes stop being
 verifiable once the chain they anchored is gone), since this app has no
 migration tooling to patch the ledger in place.
+
+---
+
+## 13. Positioning against real commercial/border-security products
+
+The gaps below are structural — they exist because of what this prototype's
+input and scope are, not because of a tunable that was measured and fell
+short. Confirmed against real competitor products' public documentation.
+
+- **No chip/NFC reading or ICAO PKD Passive Authentication** (already #2)
+  — real vendors (e.g. Entrust, Regula) read the ePassport chip and
+  cryptographically validate it against issuer certificates; this system
+  only OCRs the printed MRZ off a photograph, a structurally weaker trust
+  model. Entrust's own documentation states NFC scanning "halv[es] the
+  turnaround time of verification and return[s] a 95% pass rate on
+  successful scans" versus its standard (OCR/photo-based) document check —
+  Entrust's number, not independently re-measured here.
+- **No multi-spectral forensic imaging.** Real document-forensics hardware
+  inspects UV, IR, and oblique/coaxial white light to check holograms,
+  optically variable devices, and microprint. This system only ever
+  receives a single visible-light photo, so it cannot structurally detect
+  any security feature that isn't visible in ordinary light.
+- **Liveness heuristic is not ISO/IEC 30107-3 certified** (already #4) —
+  Jumio (Level 2) and Veriff (Level 1 and 2) both hold Presentation Attack
+  Detection conformance under this standard, independently tested by the
+  NIST/NVLAP-accredited iBeta lab; this system's FFT-based signal is an
+  uncertified heuristic indicator only, never independently evaluated.
+- **Tamper detection targets classical splice/copy-paste forgery only.**
+  It does not detect generative-AI or deepfake-manipulated documents.
+  AU10TIX's Q1 2026 report (9M+ verification transactions, Jan–Mar 2026)
+  states AI-generated identity fraud surpassed physical document forgery
+  for the first time on record; Veriff's 2026 fraud report separately found
+  document forgery attempts down 13% year-over-year as attackers shifted to
+  AI-generated/altered media instead.
+- **Watchlist is 3 fictional demo entries** (already #3) — real vendors
+  screen against continuously-updated global sanctions/PEP databases,
+  refreshed on the order of minutes to hours, at a scale of millions of
+  records.
